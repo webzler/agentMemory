@@ -1,0 +1,116 @@
+{
+    "name": "agentmemory",
+    "displayName": "agentMemory - Persistent Memory for AI Coding Agents",
+    "description": "Eliminates AI hallucinations by providing persistent memory for Cline, RooCode, KiloCode, and other AI coding agents. Zero config. Works instantly.",
+    "version": "0.1.0",
+    "publisher": "webzler",
+    "author": {
+        "name": "Amit Rathiesh",
+        "email": "amitrathiesh@webzler.com",
+        "url": "https://www.webzler.com"
+    },
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "AI",
+        "Machine Learning",
+        "Other"
+    ],
+    "keywords": [
+        "cline",
+        "roocode",
+        "kilocode",
+        "ai",
+        "memory",
+        "mcp",
+        "context",
+        "agent"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "agentMemory.openDashboard",
+                "title": "Open Memory Dashboard",
+                "category": "agentMemory",
+                "icon": "$(graph)"
+            },
+            {
+                "command": "agentMemory.showStats",
+                "title": "Show Memory Stats",
+                "category": "agentMemory"
+            },
+            {
+                "command": "agentMemory.startDashboardServer",
+                "title": "Start Dashboard Server (Debug Mode)",
+                "category": "agentMemory",
+                "icon": "$(server)"
+            }
+        ],
+        "configuration": {
+            "title": "agentMemory",
+            "properties": {
+                "agentMemory.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable/disable agentMemory extension"
+                },
+                "agentMemory.storageLocation": {
+                    "type": "string",
+                    "default": "./mcp-data",
+                    "description": "Location for memory storage files"
+                },
+                "agentMemory.cacheSize": {
+                    "type": "number",
+                    "default": 10000,
+                    "description": "LRU cache size (entries per project)"
+                },
+                "agentMemory.cacheTTL": {
+                    "type": "number",
+                    "default": 3600,
+                    "description": "Cache TTL in seconds (default: 1 hour)"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile",
+        "test": "node ./out/test/runTest.js",
+        "package": "vsce package",
+        "publish": "vsce publish"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/vscode": "^1.85.0",
+        "@vscode/test-electron": "^2.3.0",
+        "@vscode/vsce": "^2.22.0",
+        "typescript": "^5.3.0"
+    },
+    "dependencies": {
+        "@types/uuid": "^10.0.0",
+        "fastify": "^4.25.0",
+        "keyv": "^4.5.4",
+        "keyv-file": "^0.2.0",
+        "level": "^8.0.0",
+        "lru-cache": "^10.1.0",
+        "msgpack-lite": "^0.1.26",
+        "uuid": "^13.0.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/webzler/agentMemory"
+    },
+    "bugs": {
+        "url": "https://github.com/webzler/agentMemory/issues",
+        "email": "amitrathiesh@webzler.com"
+    },
+    "homepage": "https://www.webzler.com",
+    "license": "MIT"
+}

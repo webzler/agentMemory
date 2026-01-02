@@ -1,0 +1,10 @@
+{
+    "kilocode.mcpServers": {
+        "agentMemory": {
+            "transport": {
+                "type": "socket",
+                "path": "/tmp/mcp-memory-agentMemory.sock"
+            }
+        }
+    }
+}

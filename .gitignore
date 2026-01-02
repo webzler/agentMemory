@@ -1,0 +1,19 @@
+node_modules
+out
+dist
+*.vsix
+.vscode-test
+.vscode/.ropeproject
+*.log
+
+# Memory storage (local development)
+data/
+mcp-data/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.sublime-*
