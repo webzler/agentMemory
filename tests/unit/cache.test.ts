@@ -37,15 +37,18 @@ describe('CacheManager', () => {
             cache.set(`key${i}`, `value${i}`);
         }
 
-        // All 10 should be in cache
-        expect(cache.get('key0')).toBe('value0');
-        expect(cache.get('key9')).toBe('value9');
+        // Verify cache is full using stats (doesn't trigger updateAgeOnGet)
+        expect(cache.getStats().size).toBe(10);
 
-        // Add one more - should evict oldest (key0)
+        // Add one more - should evict the least recently used (key0)
         cache.set('key10', 'value10');
 
-        expect(cache.get('key0')).toBeUndefined(); // Evicted
+        // Now verify: key0 should be evicted, key10 should exist
+        expect(cache.get('key0')).toBeUndefined(); // Evicted (oldest)
         expect(cache.get('key10')).toBe('value10'); // New entry
+
+        // Cache should still be at max size
+        expect(cache.getStats().size).toBe(10);
     });
 
     test('should provide cache stats', () => {
