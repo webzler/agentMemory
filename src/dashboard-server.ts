@@ -50,6 +50,24 @@ export class DashboardServer {
                 return;
             }
 
+            // API endpoint for search
+            if (req.url?.startsWith('/api/search')) {
+                this.handleSearchRequest(req, res);
+                return;
+            }
+
+            // API endpoint for list/memories
+            if (req.url === '/api/memories') {
+                this.handleMemoriesRequest(req, res);
+                return;
+            }
+
+            // API endpoint for export
+            if (req.url?.startsWith('/api/export')) {
+                this.handleExportRequest(req, res);
+                return;
+            }
+
             // 404
             res.writeHead(404);
             res.end('Not Found');
@@ -164,6 +182,136 @@ export class DashboardServer {
         }
     }
 
+    /**
+     * Handle search request
+     */
+    private async handleSearchRequest(req: http.IncomingMessage, res: http.ServerResponse) {
+        try {
+            const url = new URL(req.url || '', `http://${req.headers.host}`);
+            const query = url.searchParams.get('q') || '';
+            const type = url.searchParams.get('type') || '';
+
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify([]));
+                return;
+            }
+
+            const { StorageManager } = require('./mcp-server/storage');
+            const storagePath = path.join(workspaceFolder.uri.fsPath, '.agentMemory');
+            const storage = new StorageManager(storagePath);
+
+            const projectId = path.basename(workspaceFolder.uri.fsPath);
+            let results = await storage.search(projectId, query);
+
+            // Filter by type if specified
+            if (type) {
+                results = results.filter((m: any) => m.type === type);
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(results));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Search failed' }));
+        }
+    }
+
+    /**
+     * Handle memories list request
+     */
+    private async handleMemoriesRequest(req: http.IncomingMessage, res: http.ServerResponse) {
+        try {
+            const url = new URL(req.url || '', `http://${req.headers.host}`);
+            const type = url.searchParams.get('type') || '';
+
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify([]));
+                return;
+            }
+
+            const { StorageManager } = require('./mcp-server/storage');
+            const storagePath = path.join(workspaceFolder.uri.fsPath, '.agentMemory');
+            const storage = new StorageManager(storagePath);
+
+            const projectId = path.basename(workspaceFolder.uri.fsPath);
+            const memories = type
+                ? await storage.list(projectId, type)
+                : await storage.list(projectId);
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(memories));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Failed to list memories' }));
+        }
+    }
+
+    /**
+     * Handle export request
+     */
+    private async handleExportRequest(req: http.IncomingMessage, res: http.ServerResponse) {
+        try {
+            const url = new URL(req.url || '', `http://${req.headers.host}`);
+            const format = url.searchParams.get('format') || 'json';
+
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                res.writeHead(404);
+                res.end('No workspace');
+                return;
+            }
+
+            const { StorageManager } = require('./mcp-server/storage');
+            const storagePath = path.join(workspaceFolder.uri.fsPath, '.agentMemory');
+            const storage = new StorageManager(storagePath);
+
+            const projectId = path.basename(workspaceFolder.uri.fsPath);
+            const memories = await storage.list(projectId);
+
+            if (format === 'json') {
+                res.writeHead(200, {
+                    'Content-Type': 'application/json',
+                    'Content-Disposition': `attachment; filename="memories-${Date.now()}.json"`
+                });
+                res.end(JSON.stringify(memories, null, 2));
+            } else if (format === 'markdown') {
+                const markdown = this.convertToMarkdown(memories);
+                res.writeHead(200, {
+                    'Content-Type': 'text/markdown',
+                    'Content-Disposition': `attachment; filename="memories-${Date.now()}.md"`
+                });
+                res.end(markdown);
+            } else {
+                res.writeHead(400);
+                res.end('Invalid format');
+            }
+        } catch (error) {
+            res.writeHead(500);
+            res.end('Export failed');
+        }
+    }
+
+    /**
+     * Convert memories to markdown format
+     */
+    private convertToMarkdown(memories: any[]): string {
+        const lines = ['# Agent Memories Export', '', `Generated: ${new Date().toISOString()}`, ''];
+
+        memories.forEach(memory => {
+            lines.push(`## ${memory.key}`, '');
+            lines.push(`**Type**: ${memory.type}`);
+            lines.push(`**Tags**: ${memory.tags.join(', ')}`);
+            lines.push(`**Created**: ${new Date(memory.createdAt).toLocaleString()}`, '');
+            lines.push(memory.content, '');
+            lines.push('---', '');
+        });
+
+        return lines.join('\n');
+    }
     private calculateStatistics(memories: any[]) {
         // Same logic as dashboard.ts
         const agentCounts: any = {
@@ -321,11 +469,26 @@ export class DashboardServer {
     </style>
 </head>
 <body>
-    <div class="debug-banner">🔧 DEBUG MODE - http://localhost:3333 - Full DevTools Available</div>
+    <div class="debug-banner">⚠️ DEBUG MODE - HTTP Server on localhost:${this.port}</div>
     
     <div class="header">
-        <h1>🧠 Memory Dashboard</h1>
-        <button class="refresh-btn" onclick="refresh()">🔄 Refresh</button>
+        <h1>🧠 agentMemory Dashboard</h1>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="text" id="searchInput" placeholder="Search memories..." 
+                style="padding: 8px 12px; border-radius: 4px; border: 1px solid #444; background: #2d2d2d; color: #ccc; min-width: 250px;">
+            <select id="typeFilter" style="padding: 8px 12px; border-radius: 4px; border: 1px solid #444; background: #2d2d2d; color: #ccc;">
+                <option value="">All Types</option>
+                <option value="architecture">Architecture</option>
+                <option value="pattern">Pattern</option>
+                <option value="feature">Feature</option>
+                <option value="api">API</option>
+                <option value="bug">Bug</option>
+                <option value="decision">Decision</option>
+            </select>
+            <button class="refresh-btn" onclick="exportMemories('json')">📥 Export JSON</button>
+            <button class="refresh-btn" onclick="exportMemories('markdown')">📄 Export MD</button>
+            <button class="refresh-btn" onclick="fetchAnalytics()">🔄 Refresh</button>
+        </div>
     </div>
 
     <div class="overview-grid">
@@ -444,22 +607,76 @@ export class DashboardServer {
             }
             let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Access Count</th><th>Last Updated</th></tr></thead><tbody>';
             memories.forEach(m => {
-                html += \`<tr><td>\${m.key}</td><td>\${m.type}</td><td>\${m.accessCount}</td><td>\${new Date(m.updatedAt).toLocaleString()}</td></tr>\`;
-            });
+                html += `< tr > <td>${ m.key } </td><td>${m.type}</td > <td>${ m.accessCount } </td><td>${new Date(m.updatedAt).toLocaleString()}</td > </tr>`;
+    });
             html += '</tbody></table>';
             container.innerHTML = html;
+}
+
+// Search and filter functions
+let searchTimeout;
+document.getElementById('searchInput').addEventListener('input', (e) => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => performSearch(e.target.value), 300);
+});
+
+document.getElementById('typeFilter').addEventListener('change', (e) => {
+    performSearch(document.getElementById('searchInput').value, e.target.value);
+});
+
+async function performSearch(query = '', type = '') {
+    if (!query && !type) {
+        refresh(); // Show all
+        return;
+    }
+
+    const params = new URLSearchParams();
+    if (query) params.append('q', query);
+    if (type) params.append('type', type);
+
+    try {
+        const res = await fetch(`http://localhost:${this.port}/api/search?${params}`);
+        const results = await res.json();
+
+        // Update recent activity with search results
+        const container = document.getElementById('recentActivityContainer');
+        if (results.length === 0) {
+            container.innerHTML = '<div class="empty-state">No results found</div>';
+            return;
         }
 
-        function formatNumber(num) {
-            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-            else if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-            return num.toString();
-        }
+        let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Tags</th><th>Updated</th></tr></thead><tbody>';
+        results.forEach(m => {
+            html += `<tr><td>${m.key}</td><td>${m.type}</td><td>${m.tags.join(', ')}</td><td>${new Date(m.updatedAt).toLocaleString()}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    } catch (error) {
+        console.error('Search failed:', error);
+    }
+}
 
-        // Load data on page load
-        refresh();
-    </script>
-</body>
-</html>`;
+// Export function
+function exportMemories(format) {
+    window.open(`http://localhost:${this.port}/api/export?format=${format}`, '_blank');
+}
+
+// Auto-refresh every 30 seconds
+setInterval(() => refresh(), 30000);
+
+function formatNumber(num) {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    else if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+}
+
+// Alias for backwards compatibility
+function fetchAnalytics() { refresh(); }
+
+// Load data on page load
+refresh();
+</script>
+    </body>
+    </html>`;
     }
 }
