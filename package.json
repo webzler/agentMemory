@@ -89,6 +89,7 @@
         "publish": "vsce publish"
     },
     "devDependencies": {
+        "@types/chokidar": "^1.7.5",
         "@types/jest": "^30.0.0",
         "@types/node": "^20.0.0",
         "@types/vscode": "^1.85.0",
@@ -100,6 +101,7 @@
     },
     "dependencies": {
         "@types/uuid": "^10.0.0",
+        "chokidar": "^5.0.0",
         "fastify": "^4.25.0",
         "keyv": "^4.5.4",
         "keyv-file": "^0.2.0",

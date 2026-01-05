@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
-import * as fsCallback from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import * as chokidar from 'chokidar';
 
 interface Memory {
     id: string;
@@ -35,6 +35,8 @@ interface AgentConfig {
 export class MemoryBankSync {
     private workspacePath: string;
     private mcpDataPath: string;
+    private watcher?: chokidar.FSWatcher;
+    private debounceTimers = new Map<string, NodeJS.Timeout>();
 
     // Multi-agent configuration
     private agents: AgentConfig[] = [
@@ -434,40 +436,149 @@ ${memory.content}
      * Watch for changes in markdown files and sync to MCP
      */
     async startWatching(): Promise<void> {
-        console.error('[MemoryBankSync] Starting file watching for memory bank sync...');
+        console.error('[MemoryBankSync] Starting file watching with chokidar...');
 
-        // Watch each agent's memory bank directory
+        // Build watch patterns for all agent directories
+        const patterns: string[] = [];
         for (const agent of this.agents) {
             const memoryBankPath = path.join(this.workspacePath, agent.memoryBankPath);
+            patterns.push(path.join(memoryBankPath, '**/*.md'));
+        }
+
+        // Initialize chokidar watcher
+        this.watcher = chokidar.watch(patterns, {
+            ignored: /(^|[\/\\])\../, // Ignore dotfiles
+            persistent: true,
+            ignoreInitial: true, // Don't trigger on startup
+            awaitWriteFinish: {
+                stabilityThreshold: 500,  // Wait 500ms for file to stabilize
+                pollInterval: 100
+            }
+        });
+
+        // Handle file changes
+        this.watcher.on('change', (filePath) => {
+            this.handleFileChange(filePath, 'change');
+        });
+
+        // Handle new files
+        this.watcher.on('add', (filePath) => {
+            this.handleFileChange(filePath, 'add');
+        });
+
+        // Handle deletions (optional)
+        this.watcher.on('unlink', (filePath) => {
+            console.error(`[FileWatcher] File deleted: ${path.basename(filePath)}`);
+            // Could implement deletion sync here in future
+        });
+
+        // Handle errors
+        this.watcher.on('error', (error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error('[FileWatcher] Error:', message);
+        });
+
+        // Ready event
+        this.watcher.on('ready', () => {
+            console.error('[FileWatcher] ✅ Watching memory bank files');
+        });
+    }
+
+    /**
+     * Handle file change with debouncing
+     */
+    private handleFileChange(filePath: string, eventType: 'change' | 'add'): void {
+        // Clear existing timeout for this file
+        const existingTimer = this.debounceTimers.get(filePath);
+        if (existingTimer) {
+            clearTimeout(existingTimer);
+        }
+
+        // Set new timeout (debounce for 1 second)
+        const timer = setTimeout(async () => {
+            const basename = path.basename(filePath);
+            console.error(`[FileWatcher] ${eventType === 'add' ? 'New file' : 'Change'} detected: ${basename}`);
 
             try {
-                // Check if directory exists
-                await fs.access(memoryBankPath);
+                await this.importFromFile(filePath);
+                console.error(`[FileWatcher] ✅ Synced: ${basename}`);
+            } catch (error: any) {
+                console.error(`[FileWatcher] ❌ Sync failed for ${basename}:`, error.message);
+            }
 
-                console.error(`[MemoryBankSync] Watching ${agent.name}: ${memoryBankPath}`);
+            this.debounceTimers.delete(filePath);
+        }, 1000);
 
-                // Use fs.watch for file system events
-                let debounceTimer: NodeJS.Timeout | null = null;
+        this.debounceTimers.set(filePath, timer);
+    }
 
-                fsCallback.watch(memoryBankPath, (eventType, filename) => {
-                    if (filename && filename.endsWith('.md')) {
-                        // Simple debounce to prevent multiple imports for one save
-                        if (debounceTimer) clearTimeout(debounceTimer);
+    /**
+     * Import from a specific file
+     */
+    private async importFromFile(filePath: string): Promise<void> {
+        const relativePath = path.relative(this.workspacePath, filePath);
+        const filename = path.basename(filePath);
 
-                        debounceTimer = setTimeout(() => {
-                            console.error(`[MemoryBankSync] Detected change in ${filename}, importing...`);
-                            this.importFromAgent(agent).catch(err => {
-                                console.error(`[MemoryBankSync] Import failed: ${err.message}`);
-                            });
-                        }, 1000); // Wait 1s for writes to settle
-                    }
-                });
+        // Determine which agent this file belongs to
+        let targetAgent: typeof this.agents[0] | undefined;
 
-            } catch (error) {
-                console.error(`[MemoryBankSync] Cannot watch ${agent.name}: directory not found`);
+        for (const agent of this.agents) {
+            if (relativePath.startsWith(agent.memoryBankPath)) {
+                targetAgent = agent;
+                break;
             }
         }
 
-        console.error('[MemoryBankSync] ✅ File watching active');
+        if (!targetAgent) {
+            console.warn(`[FileWatcher] Unknown agent for file: ${relativePath}`);
+            return;
+        }
+
+        // Check if this file is in the agent's mapping
+        const fileConfig = targetAgent.fileMapping[filename];
+        if (!fileConfig) {
+            console.warn(`[FileWatcher] File ${filename} not in ${targetAgent.name} mapping, skipping`);
+            return;
+        }
+
+        // Read and parse the file
+        const content = await fs.readFile(filePath, 'utf-8');
+        if (!content.trim()) {
+            console.error(`[FileWatcher] File ${filename} is empty, skipping`);
+            return;
+        }
+
+        // Parse markdown into memories
+        const memories = this.parseMarkdown(
+            content,
+            filename,
+            fileConfig,
+            targetAgent.name
+        );
+
+        // Save each memory to MCP storage
+        for (const memory of memories) {
+            await this.saveMCPMemory(memory);
+        }
+
+        console.error(`[FileWatcher] Imported ${memories.length} memories from ${filename}`);
+    }
+
+    /**
+     * Stop watching
+     */
+    async stopWatching(): Promise<void> {
+        if (this.watcher) {
+            // Clear all pending debounce timers
+            for (const timer of this.debounceTimers.values()) {
+                clearTimeout(timer);
+            }
+            this.debounceTimers.clear();
+
+            // Close watcher
+            await this.watcher.close();
+            this.watcher = undefined;
+            console.error('[FileWatcher] Stopped watching');
+        }
     }
 }

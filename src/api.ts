@@ -8,6 +8,7 @@
 
 import { SecurityManager } from './security';
 import { MCPClient } from './mcp-client';
+import { RateLimiter } from './rate-limiter';
 
 export interface MemoryOptions {
     type: 'architecture' | 'pattern' | 'feature' | 'api' | 'bug' | 'decision';
@@ -87,13 +88,20 @@ export type MemoryEventCallback = (event: MemoryEvent) => void;
  */
 export class MemoryAPI {
     private eventListeners: Set<MemoryEventCallback> = new Set();
+    private rateLimiter: RateLimiter;
 
     constructor(
         private extensionId: string,
         private projectId: string,
         private securityManager: SecurityManager,
         private mcpClient: MCPClient | null  // MCP client for server communication
-    ) { }
+    ) {
+        // Initialize rate limiter: 100 requests per minute
+        this.rateLimiter = new RateLimiter({
+            maxRequests: 100,
+            windowMs: 60000
+        });
+    }
 
     /**
      * Write a new memory to the memory bank
@@ -104,6 +112,9 @@ export class MemoryAPI {
      * @returns Promise resolving to the memory ID
      */
     async write(key: string, content: string, options: MemoryOptions): Promise<string> {
+        // Check rate limit
+        this.checkRateLimit();
+
         const createdBy = options.metadata?.createdBy || this.extensionId;
 
         // Security check: Can this extension write?
@@ -149,6 +160,9 @@ export class MemoryAPI {
      * @returns Promise resolving to the memory, or null if not found
      */
     async read(key: string): Promise<Memory | null> {
+        // Check rate limit
+        this.checkRateLimit();
+
         const params = {
             projectId: this.projectId,
             key
@@ -188,6 +202,9 @@ export class MemoryAPI {
      * @returns Promise resolving to array of matching memories
      */
     async search(options: SearchOptions = {}): Promise<Memory[]> {
+        // Check rate limit
+        this.checkRateLimit();
+
         const params = {
             projectId: this.projectId,
             query: options.query,
@@ -291,6 +308,22 @@ export class MemoryAPI {
         };
 
         return await this.callMCPTool('memory_stats', params);
+    }
+
+    /**
+     * Internal: Check rate limit and throw if exceeded
+     */
+    private checkRateLimit(): void {
+        if (!this.rateLimiter.checkLimit(this.extensionId)) {
+            const usage = this.rateLimiter.getUsage(this.extensionId);
+            const resetInSeconds = Math.ceil(usage.resetIn / 1000);
+            throw new Error(
+                `Rate limit exceeded for extension '${this.extensionId}'. ` +
+                `Limit: ${usage.limit} requests per minute. ` +
+                `Current: ${usage.current}/${usage.limit}. ` +
+                `Resets in ${resetInSeconds} seconds.`
+            );
+        }
     }
 
     /**
