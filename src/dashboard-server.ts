@@ -635,7 +635,7 @@ async function performSearch(query = '', type = '') {
     if (type) params.append('type', type);
 
     try {
-        const res = await fetch(`http://localhost:${this.port}/api/search?${params}`);
+        const res = await fetch('http://localhost:${this.port}/api/search?' + params);
         const results = await res.json();
 
         // Update recent activity with search results
@@ -658,7 +658,7 @@ async function performSearch(query = '', type = '') {
 
 // Export function
 function exportMemories(format) {
-    window.open(`http://localhost:${this.port}/api/export?format=${format}`, '_blank');
+    window.open('http://localhost:${this.port}/api/export?format=' + format, '_blank');
 }
 
 // Auto-refresh every 30 seconds

@@ -1,11 +1,9 @@
+## database-schema
 
+# Database Schema
 
-## oauth-implementation
-
-# OAuth Implementation
-
-We use Passport.js for OAuth authentication.
+PostgreSQL schema design
 
 **Type:** architecture  
-**Tags:** auth, oauth, security  
+**Tags:** database, postgresql, schema  
 **Updated:** 1/5/2026

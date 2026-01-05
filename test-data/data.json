@@ -9,9 +9,9 @@
     [
       "test-project:stats-test",
       {
-        "value": "{\"value\":{\"id\":\"123e4567-e89b-12d3-a456-426614174006\",\"projectId\":\"test-project\",\"key\":\"stats-test\",\"type\":\"feature\",\"content\":\"Test\",\"tags\":[],\"relationships\":{\"dependsOn\":[],\"implements\":[]},\"metadata\":{\"accessCount\":0,\"createdBy\":\"test\"},\"createdAt\":1767616503168,\"updatedAt\":1767616503168},\"expires\":null}"
+        "value": "{\"value\":{\"id\":\"123e4567-e89b-12d3-a456-426614174006\",\"projectId\":\"test-project\",\"key\":\"stats-test\",\"type\":\"feature\",\"content\":\"Test\",\"tags\":[],\"relationships\":{\"dependsOn\":[],\"implements\":[]},\"metadata\":{\"accessCount\":0,\"createdBy\":\"test\"},\"createdAt\":1767617083550,\"updatedAt\":1767617083550},\"expires\":null}"
       }
     ]
   ],
-  "lastExpire": 1767616503168
+  "lastExpire": 1767617083550
 }
