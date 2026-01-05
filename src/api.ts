@@ -7,6 +7,7 @@
  */
 
 import { SecurityManager } from './security';
+import { MCPClient } from './mcp-client';
 
 export interface MemoryOptions {
     type: 'architecture' | 'pattern' | 'feature' | 'api' | 'bug' | 'decision';
@@ -91,7 +92,7 @@ export class MemoryAPI {
         private extensionId: string,
         private projectId: string,
         private securityManager: SecurityManager,
-        private mcpClient: any // Reference to MCP client/server
+        private mcpClient: MCPClient | null  // MCP client for server communication
     ) { }
 
     /**
@@ -296,17 +297,17 @@ export class MemoryAPI {
      * Internal: Call MCP tool
      */
     private async callMCPTool(toolName: string, params: any): Promise<any> {
-        // This will be implemented to communicate with the MCP server
-        // For now, return a placeholder
-        console.log(`[MemoryAPI] Calling tool: ${toolName}`, params);
+        if (!this.mcpClient) {
+            throw new Error('MCP client not initialized. Cannot call tools without server connection.');
+        }
 
-        // TODO: Implement actual MCP communication
-        // This could use:
-        // 1. Direct function calls to storage layer
-        // 2. Message passing to MCP server process
-        // 3. HTTP/socket communication
-
-        return null;
+        try {
+            const result = await this.mcpClient.call(toolName, params);
+            return result;
+        } catch (error: any) {
+            console.error(`[MemoryAPI] Error calling ${toolName}:`, error);
+            throw new Error(`Failed to call MCP tool ${toolName}: ${error.message}`);
+        }
     }
 
     /**

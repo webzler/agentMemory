@@ -4,9 +4,11 @@ import { ConfigManager } from './config';
 import { InterceptorManager } from './interceptor';
 import { MemoryAPI } from './api';
 import { SecurityManager } from './security';
+import { MCPClient } from './mcp-client';
 import * as path from 'path';
 
 let mcpServerProcess: ChildProcess | null = null;
+let mcpClient: MCPClient | null = null;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
 
@@ -60,8 +62,8 @@ export function activate(context: vscode.ExtensionContext) {
             statusBarItem.text = '$(database) Memory: Error';
         });
 
-    // Start bundled MCP server
-    startMCPServer(context, workspaceFolder.uri.fsPath);
+    // Start bundled MCP server and get client
+    mcpClient = startMCPServer(context, workspaceFolder.uri.fsPath);
 
     // Register commands
     const statsCommand = vscode.commands.registerCommand('agentMemory.showStats', () => {
@@ -95,13 +97,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Initialize and export the public API
     const projectId = path.basename(workspaceFolder.uri.fsPath);
-    const api = new MemoryAPI('agentmemory', projectId, securityManager, null);
+    const api = new MemoryAPI('agentmemory', projectId, securityManager, mcpClient);
 
     // Return API for other extensions to use
     return api;
 }
 
-function startMCPServer(context: vscode.ExtensionContext, workspacePath: string) {
+function startMCPServer(context: vscode.ExtensionContext, workspacePath: string): MCPClient {
     // Get project ID from workspace path
     const projectId = path.basename(workspacePath);
 
@@ -128,6 +130,12 @@ function startMCPServer(context: vscode.ExtensionContext, workspacePath: string)
         outputChannel.appendLine(`[MCP Server] Exited with code ${code}`);
         statusBarItem.text = '$(database) Memory: Offline';
     });
+
+    // Create and return MCP client
+    const client = new MCPClient(mcpServerProcess);
+    outputChannel.appendLine(`✅ MCP Client initialized`);
+
+    return client;
 }
 
 /**

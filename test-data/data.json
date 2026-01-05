@@ -1,0 +1,17 @@
+{
+  "cache": [
+    [
+      "test-project:_index_test-project",
+      {
+        "value": "{\"value\":[\"stats-test\"],\"expires\":null}"
+      }
+    ],
+    [
+      "test-project:stats-test",
+      {
+        "value": "{\"value\":{\"id\":\"123e4567-e89b-12d3-a456-426614174006\",\"projectId\":\"test-project\",\"key\":\"stats-test\",\"type\":\"feature\",\"content\":\"Test\",\"tags\":[],\"relationships\":{\"dependsOn\":[],\"implements\":[]},\"metadata\":{\"accessCount\":0,\"createdBy\":\"test\"},\"createdAt\":1767574794804,\"updatedAt\":1767574794804},\"expires\":null}"
+      }
+    ]
+  ],
+  "lastExpire": 1767574794804
+}

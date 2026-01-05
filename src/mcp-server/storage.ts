@@ -1,7 +1,8 @@
 import Keyv from 'keyv';
 import KeyvFile from 'keyv-file';
 import * as path from 'path';
-import * as fs from 'fs/promises';
+import *  as fs from 'fs/promises';
+import { MemorySchema } from './schemas';
 
 interface Memory {
     id: string;
@@ -68,6 +69,14 @@ export class StorageManager {
      * Write a memory to storage
      */
     async write(projectId: string, memory: Memory): Promise<void> {
+        // Validate memory object using Zod schema
+        try {
+            MemorySchema.parse(memory);
+        } catch (error: any) {
+            const errorMessage = error.errors?.map((e: any) => `${e.path.join('.')}: ${e.message}`).join(', ') || error.message;
+            throw new Error(`Invalid memory object: ${errorMessage}`);
+        }
+
         const store = await this.getStore(projectId);
 
         // Update the index

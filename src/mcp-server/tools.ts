@@ -2,6 +2,7 @@ import { StorageManager } from './storage';
 import { CacheManager } from './cache';
 import { MemoryBankSync } from './memory-bank-sync';
 import { v4 as uuidv4 } from 'uuid';
+import { MemoryWriteParamsSchema, MemorySearchParamsSchema, MemoryReadParamsSchema, MemoryUpdateParamsSchema } from './schemas';
 
 interface Memory {
     id: string;
