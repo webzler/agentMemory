@@ -607,8 +607,8 @@ export class DashboardServer {
             }
             let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Access Count</th><th>Last Updated</th></tr></thead><tbody>';
             memories.forEach(m => {
-                html += `< tr > <td>${ m.key } </td><td>${m.type}</td > <td>${ m.accessCount } </td><td>${new Date(m.updatedAt).toLocaleString()}</td > </tr>`;
-    });
+                html += '<tr><td>' + m.key + '</td><td>' + m.type + '</td><td>' + m.accessCount + '</td><td>' + new Date(m.updatedAt).toLocaleString() + '</td></tr>';
+            });
             html += '</tbody></table>';
             container.innerHTML = html;
 }
@@ -647,11 +647,11 @@ async function performSearch(query = '', type = '') {
 
         let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Tags</th><th>Updated</th></tr></thead><tbody>';
         results.forEach(m => {
-            html += `<tr><td>${m.key}</td><td>${m.type}</td><td>${m.tags.join(', ')}</td><td>${new Date(m.updatedAt).toLocaleString()}</td></tr>`;
+            html += '<tr><td>' + m.key + '</td><td>' + m.type + '</td><td>' + m.tags.join(', ') + '</td><td>' + new Date(m.updatedAt).toLocaleString() + '</td></tr>';
         });
         html += '</tbody></table>';
         container.innerHTML = html;
-    } catch (error) {
+    } catch(error) {
         console.error('Search failed:', error);
     }
 }
