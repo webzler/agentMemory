@@ -35,9 +35,39 @@
         "commands": [
             {
                 "command": "agentMemory.openDashboard",
-                "title": "Open Memory Dashboard",
+                "title": "Open Dashboard (Webview)",
                 "category": "agentMemory",
-                "icon": "$(graph)"
+                "icon": "$(server)"
+            },
+            {
+                "command": "agentMemory.searchMemories",
+                "title": "Search Memories",
+                "category": "agentMemory",
+                "icon": "$(search)"
+            },
+            {
+                "command": "agentMemory.viewAllMemories",
+                "title": "View All Memories",
+                "category": "agentMemory",
+                "icon": "$(list-unordered)"
+            },
+            {
+                "command": "agentMemory.viewByType",
+                "title": "View Memories by Type",
+                "category": "agentMemory",
+                "icon": "$(filter)"
+            },
+            {
+                "command": "agentMemory.clearCache",
+                "title": "Clear Memory Cache",
+                "category": "agentMemory",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "agentMemory.openDashboardBrowser",
+                "title": "Open Dashboard in Browser",
+                "category": "agentMemory",
+                "icon": "$(globe)"
             },
             {
                 "command": "agentMemory.showStats",

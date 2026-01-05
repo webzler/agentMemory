@@ -81,6 +81,13 @@ export class DashboardServer {
     }
 
     /**
+     * Get the dashboard port number
+     */
+    getPort(): number {
+        return this.port;
+    }
+
+    /**
      * Handle analytics API request
      */
     private async handleAnalyticsRequest(req: http.IncomingMessage, res: http.ServerResponse) {

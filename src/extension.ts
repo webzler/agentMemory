@@ -5,6 +5,7 @@ import { InterceptorManager } from './interceptor';
 import { MemoryAPI } from './api';
 import { SecurityManager } from './security';
 import { MCPClient } from './mcp-client';
+import { MemoryCommands } from './commands';
 import * as path from 'path';
 
 let mcpServerProcess: ChildProcess | null = null;
@@ -82,6 +83,28 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialize dashboard HTTP server (for debugging)
     const { DashboardServer } = require('./dashboard-server');
     const dashboardServer = new DashboardServer(context, outputChannel);
+
+    // Initialize and get storage/cache for commands
+    const { StorageManager } = require('./mcp-server/storage');
+    const { CacheManager } = require('./mcp-server/cache');
+    const storagePath = path.join(workspaceFolder.uri.fsPath, '.agentMemory');
+    const storage = new StorageManager(storagePath);
+    const cache = new CacheManager({ maxSize: 10000, ttl: 3600000 });
+
+    // Register memory commands
+    const commands = new MemoryCommands(storage, cache, dashboardServer, context);
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentMemory.searchMemories',
+            () => commands.searchMemories()),
+        vscode.commands.registerCommand('agentMemory.viewAllMemories',
+            () => commands.viewAllMemories()),
+        vscode.commands.registerCommand('agentMemory.viewByType',
+            () => commands.viewByType()),
+        vscode.commands.registerCommand('agentMemory.clearCache',
+            () => commands.clearCache()),
+        vscode.commands.registerCommand('agentMemory.openDashboardBrowser',
+            () => commands.openDashboard())
+    );
 
     // Register command to start dashboard server
     const serverCommand = vscode.commands.registerCommand('agentMemory.startDashboardServer', () => {
