@@ -84,25 +84,60 @@
         "configuration": {
             "title": "agentMemory",
             "properties": {
-                "agentMemory.enabled": {
+                "agentMemory.rateLimit.maxRequests": {
+                    "type": "number",
+                    "default": 100,
+                    "minimum": 10,
+                    "maximum": 1000,
+                    "description": "Maximum API requests per minute per extension"
+                },
+                "agentMemory.rateLimit.windowMs": {
+                    "type": "number",
+                    "default": 60000,
+                    "minimum": 1000,
+                    "maximum": 600000,
+                    "description": "Rate limit window in milliseconds"
+                },
+                "agentMemory.conflictResolution.strategy": {
+                    "type": "string",
+                    "enum": [
+                        "newest-wins",
+                        "mcp-wins",
+                        "markdown-wins"
+                    ],
+                    "default": "newest-wins",
+                    "enumDescriptions": [
+                        "Use the memory with the most recent timestamp",
+                        "Always prefer the MCP storage version",
+                        "Always prefer the markdown file version"
+                    ],
+                    "description": "Strategy for resolving memory conflicts between MCP and markdown"
+                },
+                "agentMemory.sync.autoSync": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Enable/disable agentMemory extension"
+                    "description": "Automatically sync markdown files to MCP storage when they change"
                 },
-                "agentMemory.storageLocation": {
-                    "type": "string",
-                    "default": "./mcp-data",
-                    "description": "Location for memory storage files"
+                "agentMemory.cache.ttl": {
+                    "type": "number",
+                    "default": 3600000,
+                    "minimum": 1000,
+                    "maximum": 86400000,
+                    "description": "Cache TTL in milliseconds (1 second to 24 hours)"
                 },
-                "agentMemory.cacheSize": {
+                "agentMemory.cache.maxSize": {
                     "type": "number",
                     "default": 10000,
-                    "description": "LRU cache size (entries per project)"
+                    "minimum": 100,
+                    "maximum": 100000,
+                    "description": "Maximum number of cached memory entries"
                 },
-                "agentMemory.cacheTTL": {
+                "agentMemory.dashboard.port": {
                     "type": "number",
-                    "default": 3600,
-                    "description": "Cache TTL in seconds (default: 1 hour)"
+                    "default": 3333,
+                    "minimum": 1024,
+                    "maximum": 65535,
+                    "description": "Port number for the dashboard HTTP server"
                 }
             }
         }
