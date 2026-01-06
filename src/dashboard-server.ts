@@ -38,9 +38,10 @@ export class DashboardServer {
             }
 
             // Serve dashboard HTML
-            if (req.url === '/' || req.url === '/index.html') {
+            if (req.method === 'GET' && req.url === '/') {
+                const data = await this.getAnalyticsData();
                 res.writeHead(200, { 'Content-Type': 'text/html' });
-                res.end(this.getDashboardHTML());
+                res.end(this.getDashboardHTML(data));
                 return;
             }
 
@@ -367,71 +368,73 @@ export class DashboardServer {
 
         return lines.join('\n');
     }
+
+    /**
+     * Calculate statistics from aggregated memories
+     */
     private calculateStatistics(memories: any[]) {
-        // Same logic as dashboard.ts
-        const agentCounts: any = {
-            Cline: { writes: 0, reads: 0 },
-            RooCode: { writes: 0, reads: 0 },
-            KiloCode: { writes: 0, reads: 0 },
-            Continue: { writes: 0, reads: 0 },
-            Cursor: { writes: 0, reads: 0 }
+        const projects = new Set(memories.map(m => m.projectId).filter(Boolean));
+
+        // Agent Activity
+        const agentCounts: Record<string, { writes: number, reads: number }> = {
+            'Cline': { writes: 0, reads: 0 },
+            'RooCode': { writes: 0, reads: 0 },
+            'KiloCode': { writes: 0, reads: 0 },
+            'Continue': { writes: 0, reads: 0 },
+            'Cursor': { writes: 0, reads: 0 },
+            'Unknown': { writes: 0, reads: 0 }
         };
 
-        const typeCounts: any = {
-            Architecture: 0, Pattern: 0, Feature: 0, API: 0, Bug: 0, Decision: 0
+        const activeAgents = new Set<string>();
+
+        // Type Distribution
+        const typeCounts: Record<string, number> = {
+            'architecture': 0, 'pattern': 0, 'feature': 0, 'api': 0, 'bug': 0, 'decision': 0
         };
 
         let totalTokensWritten = 0;
         let totalTokensRead = 0;
-        const activeAgents = new Set<string>();
-        const recentActivity: any[] = [];
-        const projects = new Set<string>();
+        const tokenHistory: any[] = [];
 
-        memories.forEach(memory => {
-            if (memory.projectId) projects.add(memory.projectId);
-            const createdBy = memory.metadata?.createdBy || 'Unknown';
-            activeAgents.add(createdBy);
+        memories.forEach(m => {
+            // Count Agent
+            const agent = m._impliedAgent || 'Unknown';
+            if (!agentCounts[agent]) agentCounts[agent] = { writes: 0, reads: 0 };
 
-            let agentName = 'Unknown';
-            if (createdBy.includes('cline')) agentName = 'Cline';
-            else if (createdBy.includes('roocode')) agentName = 'RooCode';
-            else if (createdBy.includes('kilocode')) agentName = 'KiloCode';
-            else if (createdBy.includes('continue')) agentName = 'Continue';
-            else if (createdBy.includes('cursor')) agentName = 'Cursor';
+            // Heuristic: creation is a write, access is a read (conceptually)
+            // But we only have 'accessCount' usually.
+            // Let's count existence as 1 write.
+            agentCounts[agent].writes += 1;
 
-            if (agentCounts[agentName]) agentCounts[agentName].writes++;
+            // Reads approximated by accessCount
+            const reads = m.metadata?.accessCount || 0;
+            agentCounts[agent].reads += reads;
 
-            const contentLength = memory.content?.length || 0;
-            const estimatedTokens = Math.ceil(contentLength / 4);
-            totalTokensWritten += estimatedTokens;
+            if (agent !== 'Unknown') activeAgents.add(agent);
 
-            const accessCount = memory.metadata?.accessCount || 0;
-            totalTokensRead += estimatedTokens * accessCount;
-            if (agentCounts[agentName]) agentCounts[agentName].reads += accessCount;
+            // Count Type
+            if (m.type && typeCounts[m.type.toLowerCase()] !== undefined) {
+                typeCounts[m.type.toLowerCase()]++;
+            }
 
-            const type = memory.type || 'Unknown';
-            const typeKey = type.charAt(0).toUpperCase() + type.slice(1);
-            if (typeCounts[typeKey] !== undefined) typeCounts[typeKey]++;
+            // Tokens (Mock calculation if missing: ~4 chars per token)
+            const contentLen = (m.content || '').length;
+            const wTokens = Math.ceil(contentLen / 4);
+            const rTokens = wTokens * reads;
 
-            recentActivity.push({
-                timestamp: memory.createdAt || Date.now(),
-                agent: agentName,
-                action: 'write',
-                key: memory.key
-            });
+            totalTokensWritten += wTokens;
+            totalTokensRead += rTokens;
         });
 
-        recentActivity.sort((a, b) => b.timestamp - a.timestamp);
-
-        const topMemories = memories
-            .filter(m => m.metadata?.accessCount > 0)
-            .sort((a, b) => (b.metadata?.accessCount || 0) - (a.metadata?.accessCount || 0))
-            .slice(0, 10)
+        const recentActivity = memories
+            .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+            .slice(0, 15)
             .map(m => ({
                 key: m.key,
                 type: m.type,
-                accessCount: m.metadata?.accessCount || 0,
-                updatedAt: m.updatedAt || m.createdAt
+                agent: m._impliedAgent || 'Unknown',
+                action: m.createdAt === m.updatedAt ? 'Created' : 'Updated',
+                time: m.updatedAt || m.createdAt
             }));
 
         return {
@@ -443,17 +446,17 @@ export class DashboardServer {
                 totalTokensRead
             },
             agentActivity: {
-                labels: ['Cline', 'RooCode', 'KiloCode', 'Continue', 'Cursor'],
-                writes: Object.values(agentCounts).map((a: any) => a.writes),
-                reads: Object.values(agentCounts).map((a: any) => a.reads)
+                labels: Object.keys(agentCounts),
+                writes: Object.values(agentCounts).map(a => a.writes),
+                reads: Object.values(agentCounts).map(a => a.reads)
             },
             memoryTypes: {
-                labels: ['Architecture', 'Pattern', 'Feature', 'API', 'Bug', 'Decision'],
+                labels: Object.keys(typeCounts).map(k => k.charAt(0).toUpperCase() + k.slice(1)),
                 data: Object.values(typeCounts)
             },
-            tokenMetrics: { timestamps: [], written: [], read: [] },
-            recentActivity: recentActivity.slice(0, 10),
-            topMemories,
+            tokenMetrics: { timestamps: [], written: [], read: [] }, // TODO: Implement real history tracking
+            recentActivity,
+            topMemories: [],
             projects: Array.from(projects)
         };
     }
@@ -473,335 +476,286 @@ export class DashboardServer {
     /**
      * Get dashboard HTML (modified to fetch from API)
      */
-    private getDashboardHTML(): string {
+    private getDashboardHTML(data: any) {
+        // Read Icon
+        const fs = require('fs');
+        const iconPath = path.join(this.context.extensionPath, 'images', 'icon.png');
+        let iconBase64 = '';
+        try {
+            iconBase64 = 'data:image/png;base64,' + fs.readFileSync(iconPath, 'base64');
+        } catch (e) {
+            // Fallback if image missing
+            iconBase64 = '';
+        }
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>agentMemory Dashboard (Debug Mode)</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <title>agentMemory Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        :root {
+            --bg-dark: #0f0f15;
+            --bg-card: rgba(30, 30, 45, 0.7);
+            --border-color: rgba(139, 92, 246, 0.15);
+            --text-primary: #e8e8e8;
+            --text-secondary: #a0a0b8;
+            --accent-purple: #8B5CF6;
+            --accent-blue: #3B82F6;
+            --gradient-primary: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
-            background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
-            color: #e8e8e8;
-            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: radial-gradient(circle at top right, #1a1a2e 0%, #0f0f15 100%);
+            color: var(--text-primary);
             min-height: 100vh;
         }
+        
+        .container { padding: 24px 40px; max-width: 1800px; margin: 0 auto; }
+        
+        /* HEADER */
         .header {
-            background: rgba(30, 30, 46, 0.8);
-            backdrop-filter: blur(10px);
-            padding: 20px 40px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid rgba(139, 92, 246, 0.2);
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            margin-bottom: 32px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
         }
-        .header h1 {
-            font-size: 24px;
-            font-weight: 600;
+        .brand {
             display: flex;
             align-items: center;
             gap: 12px;
-            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+        }
+        .logo { width: 32px; height: 32px; object-fit: contain; }
+        .brand h1 {
+            font-size: 20px;
+            font-weight: 600;
+            background: var(--gradient-primary);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
         }
-        .header-controls {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        .header input, .header select {
-            padding: 10px 16px;
-            border-radius: 8px;
-            border: 1px solid rgba(139, 92, 246, 0.3);
-            background: rgba(30, 30, 46, 0.6);
-            color: #e8e8e8;
-            font-size: 14px;
-            outline: none;
-            transition: all 0.3s;
-        }
-        .header input:focus, .header select:focus {
-            border-color: #8B5CF6;
-            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
-        }
-        .refresh-btn {
-            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
-            color: #fff;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            transition: transform 0.2s, box-shadow 0.2s;
-            font-size: 14px;
-        }
-        .refresh-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
-        }
-        .container { padding: 30px 40px; max-width: 1600px; margin: 0 auto; }
         
-        /* Overview Cards */
-        .overview-grid {
+        .controls { display: flex; gap: 12px; }
+        .search-box {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 16px;
+            color: white;
+            width: 280px;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-box:focus { border-color: var(--accent-purple); }
+        
+        .btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn:hover { background: rgba(255, 255, 255, 0.1); }
+        .btn-primary {
+            background: var(--gradient-primary);
+            border: none;
+            color: white;
+        }
+        .btn-primary:hover { opacity: 0.9; }
+
+        /* STATS GRID */
+        .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(4, 1fr);
             gap: 20px;
-            margin-bottom: 30px;
+            margin-bottom: 24px;
         }
         .stat-card {
-            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
             backdrop-filter: blur(10px);
-            border: 1px solid rgba(139, 92, 246, 0.2);
-            border-radius: 16px;
-            padding: 24px;
-            transition: transform 0.3s, box-shadow 0.3s;
         }
-       .stat-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 30px rgba(139, 92, 246, 0.3);
-        }
-        .stat-label {
-            font-size: 13px;
-            color: #a0a0b8;
+        .stat-title {
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 8px;
         }
         .stat-value {
-            font-size: 36px;
+            font-size: 28px;
             font-weight: 700;
-            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: white;
+            margin-bottom: 4px;
         }
+        .stat-sub { font-size: 12px; color: var(--text-secondary); opacity: 0.7; }
         
-        /* Chart Cards */
-        .grid {
+        /* CHARTS SECTION */
+        .charts-row {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 24px;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
             margin-bottom: 24px;
         }
-        .chart-card {
-            background: rgba(30, 30, 46, 0.6);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(139, 92, 246, 0.2);
-            border-radius: 16px;
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
             padding: 24px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
         }
-        .chart-title {
-            font-size: 18px;
-            font-weight: 600;
+        .card-header {
+            display: flex;
+            justify-content: space-between;
             margin-bottom: 20px;
-            color: #e8e8e8;
         }
-        .chart-container { height: 300px; }
+        .card-title { font-size: 14px; font-weight: 600; }
         
-        /* Tables */
-        .table-card {
-            background: rgba(30, 30, 46, 0.6);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(139, 92, 246, 0.2);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 24px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-        }
-        table {
+        /* TABLE */
+        .table-container {
             width: 100%;
-            border-collapse: collapse;
+            overflow-x: auto;
         }
-        thead th {
+        table { width: 100%; border-collapse: collapse; }
+        th {
             text-align: left;
-            padding: 12px;
-            font-size: 13px;
-            color: #8B5CF6;
+            padding: 12px 16px;
+            font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
         }
-        tbody td {
-            padding: 16px 12px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            font-size: 14px;
+        td {
+            padding: 16px;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
         }
-        tbody tr:hover {
-            background: rgba(139, 92, 246, 0.05);
+        tr:last-child td { border-bottom: none; }
+        
+        .agent-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: rgba(139, 92, 246, 0.1);
+            color: #d8b4fe;
+            font-size: 12px;
         }
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #6b6b8a;
-            font-size: 16px;
-        }
+        
+        /* Chart specific overrides */
+        .chart-wrapper { position: relative; height: 260px; width: 100%; }
+
     </style>
 </head>
 <body>
-    <div class="debug-banner">⚠️ DEBUG MODE - HTTP Server on localhost:${this.port}</div>
-    
-    <div class="header">
-        <h1>🧠 agentMemory Dashboard</h1>
-        <div style="display: flex; gap: 10px; align-items: center;">
-            <input type="text" id="searchInput" placeholder="Search memories..." 
-                style="padding: 8px 12px; border-radius: 4px; border: 1px solid #444; background: #2d2d2d; color: #ccc; min-width: 250px;">
-            <select id="typeFilter" style="padding: 8px 12px; border-radius: 4px; border: 1px solid #444; background: #2d2d2d; color: #ccc;">
-                <option value="">All Types</option>
-                <option value="architecture">Architecture</option>
-                <option value="pattern">Pattern</option>
-                <option value="feature">Feature</option>
-                <option value="api">API</option>
-                <option value="bug">Bug</option>
-                <option value="decision">Decision</option>
-            </select>
-            <button class="refresh-btn" onclick="exportMemories('json')">📥 Export JSON</button>
-            <button class="refresh-btn" onclick="exportMemories('markdown')">📄 Export MD</button>
-            <button class="refresh-btn" onclick="fetchAnalytics()">🔄 Refresh</button>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="brand">
+                <img src="${iconBase64}" class="logo" alt="logo" />
+                <h1>agentMemory Dashboard</h1>
+            </div>
+            <div class="controls">
+                <input type="text" class="search-box" placeholder="Search memories..." id="searchInput">
+                <button class="btn" onclick="exportJSON()">Export JSON</button>
+                <button class="btn btn-primary" onclick="window.location.reload()">Refresh</button>
+            </div>
+        </header>
+
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-title">Total Memories</div>
+                <div class="stat-value">${data.overview.totalMemories}</div>
+                <div class="stat-sub">Stored Across All Projects</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Projects</div>
+                <div class="stat-value">${data.overview.totalProjects}</div>
+                <div class="stat-sub">Active Memory Contexts</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Active Agents</div>
+                <div class="stat-value">${data.overview.activeAgents}</div>
+                <div class="stat-sub">Currently Contributing</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Tokens Written</div>
+                <div class="stat-value">${(data.overview.totalTokensWritten / 1000).toFixed(1)}k</div>
+                <div class="stat-sub">Estimated Content Volume</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-row">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Agent Activity</div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="agentChart"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Memory Types</div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="typeChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Recent Activity</div>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Agent</th>
+                            <th>Action</th>
+                            <th>Key</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activityBody">
+                        ${data.recentActivity.map((item: any) => `
+                        <tr>
+                            <td>${new Date(item.time).toLocaleString()}</td>
+                            <td><span class="agent-badge">${item.agent}</span></td>
+                            <td>${item.action}</td>
+                            <td style="font-family: monospace; color: var(--accent-blue);">${item.key}</td>
+                            <td>${item.type}</td>
+                        </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
-    <div class="overview-grid">
-        <div class="stat-card"><div class="stat-label">Total Memories</div><div class="stat-value" id="totalMemories">0</div></div>
-        <div class="stat-card"><div class="stat-label">Projects</div><div class="stat-value" id="totalProjects">0</div></div>
-        <div class="stat-card"><div class="stat-label">Active Agents</div><div class="stat-value" id="activeAgents">0</div></div>
-        <div class="stat-card"><div class="stat-label">Tokens Written</div><div class="stat-value" id="tokensWritten">0</div></div>
-        <div class="stat-card"><div class="stat-label">Tokens Read</div><div class="stat-value" id="tokensRead">0</div></div>
-    </div>
-
-    <div class="charts-grid">
-        <div class="chart-card"><div class="chart-title">Agent Activity</div><div class="chart-container"><canvas id="agentChart"></canvas></div></div>
-        <div class="chart-card"><div class="chart-title">Memory Types</div><div class="chart-container"><canvas id="typeChart"></canvas></div></div>
-    </div>
-
-    <div class="chart-card" style="margin-bottom: 20px;"><div class="chart-title">Token Metrics Over Time</div><div class="chart-container"><canvas id="tokenChart"></canvas></div></div>
-    <div class="table-card"><div class="chart-title">Recent Activity</div><div id="recentActivityContainer"></div></div>
-    <div class="table-card"><div class="chart-title">Top Memories</div><div id="topMemoriesContainer"></div></div>
-
     <script>
-        let charts = {};
-
-        async function fetchData() {
-            const res = await fetch('http://localhost:3333/api/analytics');
-            return await res.json();
-        }
-
-        async function refresh() {
-            console.log('[Dashboard] Fetching data...');
-            const data = await fetchData();
-            console.log('[Dashboard] Data:', data);
-            updateDashboard(data);
-        }
-
-        function updateDashboard(data) {
-            document.getElementById('totalMemories').textContent = data.overview.totalMemories;
-            document.getElementById('totalProjects').textContent = data.overview.totalProjects;
-            document.getElementById('activeAgents').textContent = data.overview.activeAgents;
-            document.getElementById('tokensWritten').textContent = formatNumber(data.overview.totalTokensWritten);
-            document.getElementById('tokensRead').textContent = formatNumber(data.overview.totalTokensRead);
-
-            updateAgentChart(data.agentActivity);
-            updateTypeChart(data.memoryTypes);
-            updateTokenChart(data.tokenMetrics);
-            updateRecentActivity(data.recentActivity);
-            updateTopMemories(data.topMemories);
-        }
-
-        function updateAgentChart(data) {
-            const ctx = document.getElementById('agentChart').getContext('2d');
-            if (charts.agentChart) charts.agentChart.destroy();
-            charts.agentChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: data.labels,
-                    datasets: [
-                        { label: 'Writes', data: data.writes, backgroundColor: 'rgba(75, 192, 192, 0.6)' },
-                        { label: 'Reads', data: data.reads, backgroundColor: 'rgba(153, 102, 255, 0.6)' }
-                    ]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-        }
-
-        function updateTypeChart(data) {
-            const ctx = document.getElementById('typeChart').getContext('2d');
-            if (charts.typeChart) charts.typeChart.destroy();
-            charts.typeChart = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: data.labels,
-                    datasets: [{
-                        data: data.data,
-                        backgroundColor: ['rgba(255,99,132,0.6)','rgba(54,162,235,0.6)','rgba(255,206,86,0.6)','rgba(75,192,192,0.6)','rgba(153,102,255,0.6)','rgba(255,159,64,0.6)']
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-        }
-
-        function updateTokenChart(data) {
-            const ctx = document.getElementById('tokenChart').getContext('2d');
-            if (charts.tokenChart) charts.tokenChart.destroy();
-            charts.tokenChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: data.timestamps,
-                    datasets: [
-                        { label: 'Tokens Written', data: data.written, borderColor: 'rgba(75,192,192,1)', fill: false },
-                        { label: 'Tokens Read', data: data.read, borderColor: 'rgba(153,102,255,1)', fill: false }
-                    ]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
-        }
-
-        function updateRecentActivity(activities) {
-            const container = document.getElementById('recentActivityContainer');
-            if (!activities || activities.length === 0) {
-                container.innerHTML = '<div class="empty-state">No recent activity</div>';
-                return;
-            }
-            let html = '<table><thead><tr><th>Time</th><th>Agent</th><th>Action</th><th>Key</th></tr></thead><tbody>';
-            activities.forEach(a => {
-                html += \`<tr><td>\${new Date(a.timestamp).toLocaleString()}</td><td>\${a.agent}</td><td>\${a.action}</td><td>\${a.key}</td></tr>\`;
-            });
-            html += '</tbody></table>';
-            container.innerHTML = html;
-        }
-
-        function updateTopMemories(memories) {
-            const container = document.getElementById('topMemoriesContainer');
-            if (!memories || memories.length === 0) {
-                container.innerHTML = '<div class="empty-state">No memories yet</div>';
-                return;
-            }
-            let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Access Count</th><th>Last Updated</th></tr></thead><tbody>';
-            memories.forEach(m => {
-                html += '<tr><td>' + m.key + '</td><td>' + m.type + '</td><td>' + m.accessCount + '</td><td>' + new Date(m.updatedAt).toLocaleString() + '</td></tr>';
-            });
-            html += '</tbody></table>';
-            container.innerHTML = html;
-}
-
-// Search and filter functions
-let searchTimeout;
-document.getElementById('searchInput').addEventListener('input', (e) => {
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(() => performSearch(e.target.value), 300);
-});
-
-document.getElementById('typeFilter').addEventListener('change', (e) => {
-    performSearch(document.getElementById('searchInput').value, e.target.value);
-});
-
-async function performSearch(query = '', type = '') {
-    if (!query && !type) {
-        refresh(); // Show all
-        return;
     }
 
     const params = new URLSearchParams();
