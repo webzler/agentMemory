@@ -12,6 +12,7 @@ let mcpServerProcess: ChildProcess | null = null;
 let mcpClient: MCPClient | null = null;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
+let dashboardServer: any | null = null; // Module-level variable for cleanup
 
 export function activate(context: vscode.ExtensionContext) {
     // Create output channel for logging
@@ -19,7 +20,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(outputChannel);
 
     outputChannel.appendLine('🧠 agentMemory extension is now active');
-    outputChannel.appendLine(`Version: 0.1.0`);
+    outputChannel.appendLine(`Version: 0.2.0`);
     outputChannel.appendLine(`Activated at: ${new Date().toLocaleString()}`);
     outputChannel.appendLine('');
 
@@ -82,7 +83,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Initialize dashboard HTTP server (for debugging)
     const { DashboardServer } = require('./dashboard-server');
-    const dashboardServer = new DashboardServer(context, outputChannel);
+    dashboardServer = new DashboardServer(context, outputChannel); // Assign to module variable
 
     // Initialize and get storage/cache for commands
     const { StorageManager } = require('./mcp-server/storage');
@@ -108,12 +109,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register command to start dashboard server
     const serverCommand = vscode.commands.registerCommand('agentMemory.startDashboardServer', () => {
-        dashboardServer.start();
+        dashboardServer?.start();
     });
     context.subscriptions.push(serverCommand);
 
     // Auto-start dashboard server
-    dashboardServer.start();
+    dashboardServer?.start();
 
     // Initialize SecurityManager
     const securityManager = new SecurityManager(context);
@@ -188,6 +189,11 @@ export function deactivate() {
     if (mcpServerProcess) {
         mcpServerProcess.kill();
         mcpServerProcess = null;
+    }
+
+    if (dashboardServer) {
+        dashboardServer.stop();
+        dashboardServer = null;
     }
 
     if (statusBarItem) {
