@@ -120,66 +120,121 @@ export class DashboardServer {
     }
 
     /**
-     * Get analytics data (same as dashboard.ts)
+     * Get analytics data from ALL projects
      */
     private async getAnalyticsData() {
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) {
-            this.outputChannel.appendLine('[DashboardServer] No workspace folder found');
-            return this.getEmptyData();
-        }
-
-        const workspacePath = workspaceFolder.uri.fsPath;
-        const agentMemoryPath = path.join(workspacePath, '.agentMemory');
-
-        this.outputChannel.appendLine('[DashboardServer] ===== DEBUG INFO =====');
-        this.outputChannel.appendLine('[DashboardServer] Workspace path: ' + workspacePath);
-        this.outputChannel.appendLine('[DashboardServer] Looking for data in: ' + agentMemoryPath);
-
         try {
-            const fsPromises = require('fs').promises;
+            const allMemories = await this.getAllProjectMemories();
 
-            try {
-                await fsPromises.access(agentMemoryPath);
-                this.outputChannel.appendLine('[DashboardServer] ✅ Directory exists: ' + agentMemoryPath);
-            } catch (error) {
-                this.outputChannel.appendLine('[DashboardServer] ❌ Directory not found: ' + agentMemoryPath);
-                this.outputChannel.appendLine('[DashboardServer] Error: ' + error);
+            if (allMemories.length === 0) {
+                this.outputChannel.appendLine('[DashboardServer] No memories found across all projects');
                 return this.getEmptyData();
             }
 
-            const files = await fsPromises.readdir(agentMemoryPath);
-            this.outputChannel.appendLine('[DashboardServer] Files in directory: ' + files.length);
-
-            const memoryFiles = files.filter((f: string) => f.endsWith('.json'));
-            this.outputChannel.appendLine('[DashboardServer] JSON files found: ' + memoryFiles.length);
-
-            if (memoryFiles.length === 0) {
-                this.outputChannel.appendLine('[DashboardServer] No .json files found');
-                return this.getEmptyData();
-            }
-
-            const memories: any[] = [];
-            for (const file of memoryFiles) {
-                try {
-                    const filePath = path.join(agentMemoryPath, file);
-                    const content = await fsPromises.readFile(filePath, 'utf-8');
-                    const memory = JSON.parse(content);
-                    memories.push(memory);
-                } catch (error) {
-                    this.outputChannel.appendLine('[DashboardServer] Failed to read memory file: ' + file + ' - ' + error);
-                }
-            }
-
-            this.outputChannel.appendLine('[DashboardServer] Loaded memories: ' + memories.length);
-            const stats = this.calculateStatistics(memories);
-            this.outputChannel.appendLine('[DashboardServer] Stats: ' + JSON.stringify(stats.overview));
-
-            return stats;
+            this.outputChannel.appendLine(`[DashboardServer] Found ${allMemories.length} memories across all projects`);
+            return this.calculateStatistics(allMemories);
         } catch (error) {
             this.outputChannel.appendLine('[DashboardServer] Error: ' + error);
             return this.getEmptyData();
         }
+    }
+
+    /**
+     * Scan all projects for memories
+     */
+    private async getAllProjectMemories(): Promise<any[]> {
+        const allMemories: any[] = [];
+        const projectPaths = await this.findAllProjects();
+
+        this.outputChannel.appendLine(`[DashboardServer] Scanning ${projectPaths.length} projects`);
+
+        for (const projectPath of projectPaths) {
+            try {
+                const agentMemoryPath = path.join(projectPath, '.agentMemory');
+                const fsPromises = require('fs').promises;
+
+                const files = await fsPromises.readdir(agentMemoryPath);
+                const memoryFiles = files.filter((f: string) => f.endsWith('.json'));
+
+                this.outputChannel.appendLine(`[DashboardServer] Project ${path.basename(projectPath)}: ${memoryFiles.length} files`);
+
+                for (const file of memoryFiles) {
+                    try {
+                        const filePath = path.join(agentMemoryPath, file);
+                        const data = await fsPromises.readFile(filePath, 'utf8');
+                        const parsed = JSON.parse(data);
+
+                        // Handle both cache format and direct memory format
+                        if (parsed.cache && Array.isArray(parsed.cache)) {
+                            // Cache format from data.json
+                            for (const [key, entry] of parsed.cache) {
+                                try {
+                                    const value = JSON.parse(entry.value);
+                                    if (value.value && typeof value.value === 'object') {
+                                        allMemories.push(value.value);
+                                    }
+                                } catch (e) {
+                                    // Skip invalid entries
+                                }
+                            }
+                        } else if (parsed.id && parsed.projectId) {
+                            // Direct memory format
+                            allMemories.push(parsed);
+                        }
+                    } catch (fileError) {
+                        // Skip invalid files
+                    }
+                }
+            } catch (projectError) {
+                // Skip projects that can't be read
+            }
+        }
+
+        return allMemories;
+    }
+
+    /**
+     * Find all projects with .agentMemory folders
+     */
+    private async findAllProjects(): Promise<string[]> {
+        const projects: string[] = [];
+        const fsPromises = require('fs').promises;
+        const os = require('os');
+
+        // Common project locations
+        const searchLocations = [
+            path.join(os.homedir(), 'Projects'),
+            path.join(os.homedir(), 'Development'),
+            path.join(os.homedir(), 'Code'),
+        ];
+
+        for (const location of searchLocations) {
+            try {
+                const exists = await fsPromises.access(location).then(() => true).catch(() => false);
+                if (!exists) continue;
+
+                const entries = await fsPromises.readdir(location, { withFileTypes: true });
+
+                for (const entry of entries) {
+                    if (entry.isDirectory()) {
+                        const projectPath = path.join(location, entry.name);
+                        const agentMemoryPath = path.join(projectPath, '.agentMemory');
+
+                        const hasAgentMemory = await fsPromises.access(agentMemoryPath)
+                            .then(() => true)
+                            .catch(() => false);
+
+                        if (hasAgentMemory) {
+                            projects.push(projectPath);
+                        }
+                    }
+                }
+            } catch (error) {
+                // Skip locations that can't be read
+            }
+        }
+
+        return projects;
     }
 
     /**
@@ -429,43 +484,162 @@ export class DashboardServer {
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1e1e1e;
-            color: #cccccc;
-            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+            color: #e8e8e8;
+            padding: 0;
+            min-height: 100vh;
         }
-        .debug-banner {
-            background: #ff9800;
-            color: #000;
-            padding: 10px 20px;
-            margin: -20px -20px 20px -20px;
+        .header {
+            background: rgba(30, 30, 46, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        .header h1 {
+            font-size: 24px;
             font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-        .header { margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }
-        h1 { font-size: 28px; font-weight: 600; }
+        .header-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .header input, .header select {
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            background: rgba(30, 30, 46, 0.6);
+            color: #e8e8e8;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.3s;
+        }
+        .header input:focus, .header select:focus {
+            border-color: #8B5CF6;
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        }
         .refresh-btn {
-            background: #0e639c;
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
             color: #fff;
             border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
+            padding: 10px 20px;
+            border-radius: 8px;
             cursor: pointer;
+            font-weight: 500;
+            transition: transform 0.2s, box-shadow 0.2s;
             font-size: 14px;
         }
-        .refresh-btn:hover { background: #1177bb; }
-        .overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .stat-card { background: #2d2d30; border: 1px solid #3e3e42; border-radius: 8px; padding: 20px; }
-        .stat-label { font-size: 12px; text-transform: uppercase; opacity: 0.7; margin-bottom: 8px; }
-        .stat-value { font-size: 32px; font-weight: 700; }
-        .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .chart-card { background: #2d2d30; border: 1px solid #3e3e42; border-radius: 8px; padding: 20px; }
-        .chart-title { font-size: 16px; font-weight: 600; margin-bottom: 15px; }
-        .chart-container { position: relative; height: 300px; }
-        .table-card { background: #2d2d30; border: 1px solid #3e3e42; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #3e3e42; }
-        th { font-weight: 600; opacity: 0.7; font-size: 12px; text-transform: uppercase; }
-        .empty-state { text-align: center; padding: 40px; opacity: 0.5; }
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+        }
+        .container { padding: 30px 40px; max-width: 1600px; margin: 0 auto; }
+        
+        /* Overview Cards */
+        .overview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 16px;
+            padding: 24px;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+       .stat-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 30px rgba(139, 92, 246, 0.3);
+        }
+        .stat-label {
+            font-size: 13px;
+            color: #a0a0b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .stat-value {
+            font-size: 36px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        /* Chart Cards */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+        .chart-card {
+            background: rgba(30, 30, 46, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #e8e8e8;
+        }
+        .chart-container { height: 300px; }
+        
+        /* Tables */
+        .table-card {
+            background: rgba(30, 30, 46, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        thead th {
+            text-align: left;
+            padding: 12px;
+            font-size: 13px;
+            color: #8B5CF6;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+        }
+        tbody td {
+            padding: 16px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 14px;
+        }
+        tbody tr:hover {
+            background: rgba(139, 92, 246, 0.05);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6b6b8a;
+            font-size: 16px;
+        }
     </style>
 </head>
 <body>
