@@ -41,6 +41,10 @@ export class DashboardRenderer {
             --clay-shadow-inset: 
                 inset 6px 6px 10px var(--shadow-dark), 
                 inset -6px -6px 10px var(--shadow-light);
+            
+            --container-padding: 40px;
+            --card-padding: 30px;
+            --gap-size: 30px;
         }
 
         /* Light Mode Support via Media Query */
@@ -70,6 +74,17 @@ export class DashboardRenderer {
              --clay-shadow: 9px 9px 16px #a3b1c6, -9px -9px 16px #ffffff;
         }
 
+        /* Responsive Adjustments for Smaller Screens (VSCode Panel) */
+        @media (max-width: 800px) {
+            :root {
+                --container-padding: 20px;
+                --card-padding: 20px;
+                --gap-size: 15px;
+            }
+            h1 { font-size: 20px; }
+            .stat-value { font-size: 24px; }
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
@@ -77,37 +92,43 @@ export class DashboardRenderer {
             background-color: var(--bg-color);
             color: var(--text-primary);
             min-height: 100vh;
-            padding: 40px;
+            padding: var(--container-padding);
             transition: background-color 0.3s ease;
+            overflow-x: hidden; /* Prevent horizontal scroll */
         }
 
-        .container { max-width: 1600px; margin: 0 auto; }
+        .container { 
+            max-width: 100%; 
+            margin: 0 auto; 
+        }
 
         /* Clay Headers */
         .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 40px;
-            padding: 20px 40px;
-            border-radius: 30px;
+            margin-bottom: var(--gap-size);
+            padding: 15px 30px;
+            border-radius: 20px;
             background-color: var(--bg-color);
             box-shadow: var(--clay-shadow);
+            flex-wrap: wrap;
+            gap: 15px;
         }
 
         .brand { display: flex; align-items: center; gap: 15px; }
-        .logo { width: 40px; height: 40px; border-radius: 12px; box-shadow: var(--clay-shadow); }
-        h1 { font-size: 24px; font-weight: 700; color: var(--accent-purple); }
+        .logo { width: 32px; height: 32px; border-radius: 10px; box-shadow: var(--clay-shadow); }
+        h1 { font-size: 22px; font-weight: 700; color: var(--accent-purple); }
 
         .search-box {
             border: none;
             outline: none;
             background: var(--bg-color);
-            padding: 12px 24px;
-            border-radius: 20px;
+            padding: 10px 20px;
+            border-radius: 15px;
             box-shadow: var(--clay-shadow-inset);
             color: var(--text-primary);
-            width: 300px;
+            width: 250px;
             font-size: 14px;
             transition: all 0.2s;
         }
@@ -118,13 +139,14 @@ export class DashboardRenderer {
         .btn {
             border: none;
             background: var(--bg-color);
-            padding: 12px 24px;
-            border-radius: 20px;
+            padding: 10px 20px;
+            border-radius: 15px;
             color: var(--accent-blue);
             font-weight: 600;
             box-shadow: var(--clay-shadow);
             cursor: pointer;
             transition: all 0.2s;
+            font-size: 13px;
         }
         .btn:hover {
             transform: translateY(-2px);
@@ -138,79 +160,101 @@ export class DashboardRenderer {
         /* Stats Grid - Floating Clay Cards */
         .overview-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 30px;
-            margin-bottom: 40px;
+            /* Force 4 columns on larger screens, wrap if absolutely necessary */
+            grid-template-columns: repeat(4, 1fr);
+            gap: var(--gap-size);
+            margin-bottom: var(--gap-size);
         }
+
+        /* Responsive Breakpoints for Grid */
+        @media (max-width: 700px) {
+            .overview-grid {
+                grid-template-columns: repeat(2, 1fr); /* 2x2 on tablet/narrow panel */
+            }
+        }
+        @media (max-width: 400px) {
+            .overview-grid {
+                grid-template-columns: 1fr; /* 1 column on very narrow */
+            }
+        }
+
         .stat-card {
             background-color: var(--card-bg);
-            border-radius: 30px;
-            padding: 30px;
+            border-radius: 20px;
+            padding: var(--card-padding);
             box-shadow: var(--clay-shadow);
             display: flex;
             flex-direction: column;
             align-items: center;
             text-align: center;
             transition: transform 0.3s;
+            min-height: 120px;
+            justify-content: center;
         }
-        .stat-card:hover { transform: translateY(-5px); }
+        .stat-card:hover { transform: translateY(-3px); }
         
         .stat-value {
-            font-size: 36px;
+            font-size: 28px;
             font-weight: 800;
-            margin: 10px 0;
+            margin: 8px 0;
             background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-        .stat-label { font-size: 14px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; }
+        .stat-label { font-size: 12px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
 
-        /* Charts - Deep Clay Containers */
+        /* Charts - Clay Containers */
         .grid {
             display: grid;
             grid-template-columns: 2fr 1fr;
-            gap: 30px;
-            margin-bottom: 40px;
+            gap: var(--gap-size);
+            margin-bottom: var(--gap-size);
         }
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+
         .card {
             background-color: var(--card-bg);
-            border-radius: 30px;
-            padding: 30px;
+            border-radius: 20px;
+            padding: var(--card-padding);
             box-shadow: var(--clay-shadow);
         }
         .card-title {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 700;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             color: var(--text-primary);
         }
-        .chart-wrapper { height: 300px; position: relative; }
+        .chart-wrapper { height: 250px; position: relative; }
 
         /* Table */
         .table-container {
-            border-radius: 20px;
+            border-radius: 15px;
             overflow: hidden;
             box-shadow: var(--clay-shadow-inset);
-            padding: 20px;
+            padding: 15px;
+            overflow-x: auto; /* Allow table scroll internally if needed */
         }
-        table { width: 100%; border-collapse: separate; border-spacing: 0 10px; }
-        th { color: var(--text-secondary); padding: 10px 20px; }
+        table { width: 100%; border-collapse: separate; border-spacing: 0 8px; }
+        th { color: var(--text-secondary); padding: 10px 15px; font-size: 12px; font-weight: 700; text-transform: uppercase; text-align: left;}
         td { 
             background: var(--bg-color); 
-            padding: 15px 20px; 
+            padding: 12px 15px; 
             box-shadow: var(--clay-shadow);
-            font-size: 14px;
+            font-size: 13px;
         }
         tr td:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
         tr td:last-child { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
         
         .agent-badge {
-            padding: 6px 12px;
-            border-radius: 12px;
-            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 10px;
+            font-size: 11px;
             font-weight: 700;
             box-shadow: var(--clay-shadow);
             color: var(--accent-purple);
+            background: var(--bg-color);
         }
 
     </style>
