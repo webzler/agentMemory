@@ -112,8 +112,8 @@ export function activate(context: vscode.ExtensionContext) {
     });
     context.subscriptions.push(serverCommand);
 
-    // Auto-start server in development mode (optional)
-    // dashboardServer.start();
+    // Auto-start dashboard server
+    dashboardServer.start();
 
     // Initialize SecurityManager
     const securityManager = new SecurityManager(context);
