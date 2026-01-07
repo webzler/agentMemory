@@ -40,7 +40,8 @@ export class DashboardManager {
 
         // Set HTML content using Shared Renderer
         try {
-            await this.updateWebview();
+            const data = await this.analyticsEngine.getAnalyticsData();
+            this.panel.webview.html = this.renderer.getHtml(data);
         } catch (e) {
             this.panel.webview.html = `<h1>Error loading dashboard: ${e}</h1>`;
         }
@@ -76,8 +77,12 @@ export class DashboardManager {
         if (!this.panel) return;
         try {
             const data = await this.analyticsEngine.getAnalyticsData();
-            // Reload HTML to fully re-render charts with new theme/data.
-            this.panel.webview.html = this.renderer.getHtml(data);
+            // Use postMessage to update data instead of replacing HTML
+            // This prevents corruption issues with active webview content
+            this.panel.webview.postMessage({
+                command: 'updateData',
+                data: data
+            });
         } catch (e) {
             console.error('Failed to update dashboard', e);
         }
