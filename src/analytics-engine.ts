@@ -30,6 +30,9 @@ export class AnalyticsEngine {
                     continue; // Skip
                 }
 
+                // Detect agent for this project ONCE (Performance + Accuracy)
+                const projectAgent = this.detectProjectAgent(projectPath);
+
                 const files = await fsPromises.readdir(agentMemoryPath);
                 const memoryFiles = files.filter((f: string) => f.endsWith('.json') && f !== 'data.json' && f !== 'memory.json');
 
@@ -45,7 +48,8 @@ export class AnalyticsEngine {
                                 if (value.value && typeof value.value === 'object') {
                                     const mem = value.value;
                                     if (!mem.projectId) mem.projectId = path.basename(projectPath);
-                                    mem._impliedAgent = this.inferAgent(projectPath, mem);
+                                    mem._impliedAgent = this.inferAgent(mem, projectAgent);
+                                    mem._projectPath = projectPath;
                                     allMemories.push(mem);
                                 }
                             } catch (e) { /* skip */ }
@@ -61,7 +65,8 @@ export class AnalyticsEngine {
                         const parsed = JSON.parse(data);
 
                         if (parsed.id && parsed.projectId) {
-                            parsed._impliedAgent = this.inferAgent(projectPath, parsed);
+                            parsed._impliedAgent = this.inferAgent(parsed, projectAgent);
+                            parsed._projectPath = projectPath;
                             allMemories.push(parsed);
                         }
                     } catch (fileError) { /* skip */ }
@@ -73,29 +78,49 @@ export class AnalyticsEngine {
     }
 
     /**
+     * Detect agent based on project file structure (High Priority)
+     */
+    private detectProjectAgent(projectPath: string): string | null {
+        try {
+            // KiloCode (Check first as it often forks Cline)
+            if (fs.existsSync(path.join(projectPath, '.kilocode')) ||
+                fs.existsSync(path.join(projectPath, '.kilo')) ||
+                fs.existsSync(path.join(projectPath, 'kilocode.json'))) return 'KiloCode';
+
+            // Cursor
+            if (fs.existsSync(path.join(projectPath, '.cursorrules')) ||
+                fs.existsSync(path.join(projectPath, '.cursor'))) return 'Cursor';
+
+            // Continue
+            if (fs.existsSync(path.join(projectPath, '.continue'))) return 'Continue';
+
+            // RooCode
+            if (fs.existsSync(path.join(projectPath, '.roo'))) return 'RooCode';
+
+            // Cline
+            if (fs.existsSync(path.join(projectPath, '.clinerules'))) return 'Cline';
+        } catch (e) { return null; }
+        return null;
+    }
+
+    /**
      * Infer the AI agent based on project structure and memory metadata
      */
-    private inferAgent(projectPath: string, memory: any): string {
-        // 1. Trust accurate metadata if specific
+    private inferAgent(memory: any, projectAgent: string | null): string {
+        // 1. Prefer project-level detection (Fixes KiloCode showing as Cline)
+        if (projectAgent) return projectAgent;
+
+        // 2. Trust accurate metadata if no project override
         if (memory.metadata?.createdBy && !['agent', 'user', 'unknown'].includes(memory.metadata.createdBy.toLowerCase())) {
             return memory.metadata.createdBy;
         }
-
-        // 2. Check for Agent-specific folders
-        try {
-            if (fs.existsSync(path.join(projectPath, '.clinerules'))) return 'Cline';
-            if (fs.existsSync(path.join(projectPath, '.roo'))) return 'RooCode';
-            if (fs.existsSync(path.join(projectPath, '.kilocode'))) return 'KiloCode';
-            if (fs.existsSync(path.join(projectPath, '.cursorrules'))) return 'Cursor';
-            if (fs.existsSync(path.join(projectPath, '.continue'))) return 'Continue';
-        } catch (e) { /* ignore */ }
 
         // 3. Fallback
         return 'Unknown';
     }
 
     /**
-     * Find all projects
+     * Find all projects recursively
      */
     private async findAllProjects(): Promise<string[]> {
         const projects: Set<string> = new Set();
@@ -117,29 +142,39 @@ export class AnalyticsEngine {
             path.join(os.homedir(), 'git')
         ];
 
-        for (const location of searchLocations) {
+        // Recursive walker function
+        const walk = async (dir: string, depth: number) => {
+            if (depth > 3) return; // Limit depth to avoid performance issues
+
             try {
-                const exists = await fsPromises.access(location).then(() => true).catch(() => false);
-                if (!exists) continue;
+                // Check if directory exists
+                try {
+                    await fsPromises.access(dir);
+                } catch {
+                    return;
+                }
 
-                const entries = await fsPromises.readdir(location, { withFileTypes: true });
+                const entries = await fsPromises.readdir(dir, { withFileTypes: true });
 
+                // Check if this directory is a project (has .agentMemory)
+                const hasAgentMemory = entries.some(e => e.isDirectory() && e.name === '.agentMemory');
+                if (hasAgentMemory) {
+                    projects.add(dir);
+                }
+
+                // Recurse into subdirectories
+                // Exclude common unnecessary folders to speed up search
+                const exclude = ['node_modules', '.git', 'dist', 'out', 'build', '.vscode', '.idea'];
                 for (const entry of entries) {
-                    if (entry.isDirectory()) {
-                        const projectPath = path.join(location, entry.name);
-                        const agentMemoryPath = path.join(projectPath, '.agentMemory');
-
-                        const hasAgentMemory = await fsPromises.access(agentMemoryPath)
-                            .then(() => true)
-                            .catch(() => false);
-
-                        if (hasAgentMemory) {
-                            projects.add(projectPath);
-                        }
+                    if (entry.isDirectory() && !entry.name.startsWith('.') && !exclude.includes(entry.name)) {
+                        await walk(path.join(dir, entry.name), depth + 1);
                     }
                 }
-            } catch (error) { /* skip */ }
-        }
+            } catch (error) { /* skip access errors */ }
+        };
+
+        // Run search in parallel
+        await Promise.all(searchLocations.map(loc => walk(loc, 0)));
 
         return Array.from(projects);
     }
@@ -148,8 +183,6 @@ export class AnalyticsEngine {
      * Calculate statistics
      */
     public calculateStatistics(memories: any[]) {
-        const projects = new Set(memories.map(m => m.projectId).filter(Boolean));
-
         // Initialize counts
         const agentCounts: Record<string, { writes: number, reads: number }> = {
             'Cline': { writes: 0, reads: 0 },
@@ -164,6 +197,9 @@ export class AnalyticsEngine {
         const typeCounts: Record<string, number> = {
             'architecture': 0, 'pattern': 0, 'feature': 0, 'api': 0, 'bug': 0, 'decision': 0
         };
+
+        // Project Statistics
+        const projectStats: Record<string, { name: string, path: string, count: number, lastActive: number, agents: Set<string> }> = {};
 
         let totalTokensWritten = 0;
         let totalTokensRead = 0;
@@ -190,6 +226,24 @@ export class AnalyticsEngine {
 
             totalTokensWritten += wTokens;
             totalTokensRead += rTokens;
+
+            // Project aggregation
+            if (m.projectId) {
+                if (!projectStats[m.projectId]) {
+                    projectStats[m.projectId] = {
+                        name: m.projectId,
+                        path: m._projectPath || '',
+                        count: 0,
+                        lastActive: 0,
+                        agents: new Set()
+                    };
+                }
+                const p = projectStats[m.projectId];
+                p.count++;
+                const time = m.updatedAt || m.createdAt || 0;
+                if (time > p.lastActive) p.lastActive = time;
+                if (agent !== 'Unknown') p.agents.add(agent);
+            }
         });
 
         const recentActivity = memories
@@ -203,10 +257,16 @@ export class AnalyticsEngine {
                 time: m.updatedAt || m.createdAt
             }));
 
+        // Convert Project Stats to Array
+        const projectsList = Object.values(projectStats).map(p => ({
+            ...p,
+            agents: Array.from(p.agents)
+        })).sort((a, b) => b.lastActive - a.lastActive);
+
         return {
             overview: {
                 totalMemories: memories.length,
-                totalProjects: projects.size,
+                totalProjects: projectsList.length,
                 activeAgents: activeAgents.size,
                 totalTokensWritten,
                 totalTokensRead
@@ -223,7 +283,7 @@ export class AnalyticsEngine {
             tokenMetrics: { timestamps: [], written: [], read: [] },
             recentActivity,
             topMemories: [],
-            projects: Array.from(projects)
+            projects: projectsList
         };
     }
 }

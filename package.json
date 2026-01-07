@@ -2,7 +2,7 @@
     "name": "agentmemory",
     "displayName": "agentMemory - Persistent Memory for AI Agents",
     "description": "Persistent, searchable memory system for AI coding agents. Provides VSCode commands, dashboard analytics, and MCP integration for Cline, RooCode, and other AI assistants.",
-    "version": "0.2.0",
+    "version": "0.2.2",
     "publisher": "webzler",
     "author": {
         "name": "Amit Rathiesh",

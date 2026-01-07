@@ -22,7 +22,6 @@ export class DashboardRenderer {
     <style>
         :root {
             /* Claymorphism Theme Variables */
-            /* Default Dark Mode (Matches User Preference for Dark) */
             --bg-color: #252b36;
             --text-primary: #e0e5ec;
             --text-secondary: #a0a0b8;
@@ -41,13 +40,16 @@ export class DashboardRenderer {
             --clay-shadow-inset: 
                 inset 6px 6px 10px var(--shadow-dark), 
                 inset -6px -6px 10px var(--shadow-light);
+            --clay-shadow-pressed: 
+                 inset 4px 4px 8px var(--shadow-dark), 
+                 inset -4px -4px 8px var(--shadow-light);
             
             --container-padding: 40px;
             --card-padding: 30px;
             --gap-size: 30px;
         }
 
-        /* Light Mode Support via Media Query */
+        /* Light Mode Support */
         @media (prefers-color-scheme: light) {
             :root {
                 --bg-color: #e0e5ec;
@@ -62,19 +64,20 @@ export class DashboardRenderer {
                 --clay-shadow-inset: 
                     inset 6px 6px 10px rgb(163,177,198,0.6), 
                     inset -6px -6px 10px rgba(255,255,255, 0.5);
+                --clay-shadow-pressed:
+                    inset 4px 4px 8px rgb(163,177,198,0.6), 
+                    inset -4px -4px 8px rgba(255,255,255, 0.5);
             }
         }
 
         body.vscode-light {
-            /* VSCode Specific variables if available */
              --bg-color: #e0e5ec;
              --text-primary: #2d3748;
              --card-bg: #e0e5ec;
-             /* Redefine shadows for light context */
              --clay-shadow: 9px 9px 16px #a3b1c6, -9px -9px 16px #ffffff;
         }
 
-        /* Responsive Adjustments for Smaller Screens (VSCode Panel) */
+        /* Responsive Adjustments */
         @media (max-width: 800px) {
             :root {
                 --container-padding: 20px;
@@ -94,7 +97,7 @@ export class DashboardRenderer {
             min-height: 100vh;
             padding: var(--container-padding);
             transition: background-color 0.3s ease;
-            overflow-x: hidden; /* Prevent horizontal scroll */
+            overflow-x: hidden;
         }
 
         .container { 
@@ -102,7 +105,7 @@ export class DashboardRenderer {
             margin: 0 auto; 
         }
 
-        /* Clay Headers */
+        /* Headers */
         .header {
             display: flex;
             justify-content: space-between;
@@ -157,25 +160,19 @@ export class DashboardRenderer {
             transform: translateY(0);
         }
 
-        /* Stats Grid - Floating Clay Cards */
+        /* Stats Grid - Clickable */
         .overview-grid {
             display: grid;
-            /* Force 4 columns on larger screens, wrap if absolutely necessary */
             grid-template-columns: repeat(4, 1fr);
             gap: var(--gap-size);
             margin-bottom: var(--gap-size);
         }
 
-        /* Responsive Breakpoints for Grid */
         @media (max-width: 700px) {
-            .overview-grid {
-                grid-template-columns: repeat(2, 1fr); /* 2x2 on tablet/narrow panel */
-            }
+            .overview-grid { grid-template-columns: repeat(2, 1fr); }
         }
         @media (max-width: 400px) {
-            .overview-grid {
-                grid-template-columns: 1fr; /* 1 column on very narrow */
-            }
+            .overview-grid { grid-template-columns: 1fr; }
         }
 
         .stat-card {
@@ -187,12 +184,28 @@ export class DashboardRenderer {
             flex-direction: column;
             align-items: center;
             text-align: center;
-            transition: transform 0.3s;
+            transition: all 0.2s;
             min-height: 120px;
             justify-content: center;
+            cursor: pointer; /* Indication it's clickable */
+            position: relative;
+            user-select: none;
         }
-        .stat-card:hover { transform: translateY(-3px); }
+        .stat-card:hover { 
+            transform: translateY(-5px);
+            background-color: var(--bg-color); /* Subtle lighten */
+        }
+        .stat-card:active {
+            box-shadow: var(--clay-shadow-pressed);
+            transform: translateY(0);
+        }
         
+        /* Active state for selected filter */
+        .stat-card.active {
+            box-shadow: var(--clay-shadow-inset);
+            border: 2px solid var(--accent-purple); /* Highlight */
+        }
+
         .stat-value {
             font-size: 28px;
             font-weight: 800;
@@ -203,7 +216,20 @@ export class DashboardRenderer {
         }
         .stat-label { font-size: 12px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
 
-        /* Charts - Clay Containers */
+        /* Content Sections (Views) */
+        .view-section {
+            display: none; /* Hidden by default */
+            animation: fadeIn 0.4s ease;
+        }
+        .view-section.active-view {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Charts */
         .grid {
             display: grid;
             grid-template-columns: 2fr 1fr;
@@ -225,16 +251,19 @@ export class DashboardRenderer {
             font-weight: 700;
             margin-bottom: 15px;
             color: var(--text-primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         .chart-wrapper { height: 250px; position: relative; }
 
-        /* Table */
+        /* Tables and Lists */
         .table-container {
             border-radius: 15px;
             overflow: hidden;
             box-shadow: var(--clay-shadow-inset);
             padding: 15px;
-            overflow-x: auto; /* Allow table scroll internally if needed */
+            overflow-x: auto;
         }
         table { width: 100%; border-collapse: separate; border-spacing: 0 8px; }
         th { color: var(--text-secondary); padding: 10px 15px; font-size: 12px; font-weight: 700; text-transform: uppercase; text-align: left;}
@@ -256,6 +285,7 @@ export class DashboardRenderer {
             color: var(--accent-purple);
             background: var(--bg-color);
         }
+        .tag-badge { background: #3B82F6; color: white; padding: 2px 8px; border-radius: 8px; font-size: 11px; margin-right: 4px; }
 
     </style>
 </head>
@@ -266,31 +296,32 @@ export class DashboardRenderer {
                 <img src="${iconBase64}" class="logo" alt="icon" />
                 <h1>agentMemory</h1>
             </div>
-            <input type="text" class="search-box" placeholder="Search memories...">
+            <input type="text" class="search-box" placeholder="Search memories (Coming Soon)...">
             <div style="display:flex; gap:15px;">
                 <button class="btn" onclick="location.reload()">Refresh</button>
             </div>
         </div>
 
         <div class="overview-grid">
-            <div class="stat-card">
+            <div class="stat-card" id="card-memories" onclick="switchView('recent', 'card-memories')">
                 <span class="stat-label">Total Memories</span>
                 <span class="stat-value">${data.overview.totalMemories}</span>
             </div>
-            <div class="stat-card">
+            <div class="stat-card" id="card-projects" onclick="switchView('projects', 'card-projects')">
                 <span class="stat-label">Projects</span>
                 <span class="stat-value">${data.overview.totalProjects}</span>
             </div>
-            <div class="stat-card">
+            <div class="stat-card" id="card-agents" onclick="switchView('agents', 'card-agents')">
                 <span class="stat-label">Active Agents</span>
                 <span class="stat-value">${data.overview.activeAgents}</span>
             </div>
-             <div class="stat-card">
+             <div class="stat-card" id="card-tokens" onclick="switchView('tokens', 'card-tokens')">
                 <span class="stat-label">Tokens</span>
                 <span class="stat-value">${(data.overview.totalTokensWritten / 1000).toFixed(1)}k</span>
             </div>
         </div>
 
+        <!-- Charts (Always visible for now, or could be part of Agents view) -->
         <div class="grid">
             <div class="card">
                 <div class="card-title">Agent Activity</div>
@@ -302,32 +333,105 @@ export class DashboardRenderer {
             </div>
         </div>
 
-        <div class="card">
-            <div class="card-title">Recent Activity</div>
-            <div class="table-container">
-                <table>
-                    <thead><tr><th>Time</th><th>Agent</th><th>Action</th><th>Key</th><th>Type</th></tr></thead>
-                    <tbody>
-                        ${data.recentActivity.map((item: any) => `
-                        <tr>
-                            <td>${new Date(item.time).toLocaleTimeString()}</td>
-                            <td><span class="agent-badge">${item.agent}</span></td>
-                            <td>${item.action}</td>
-                            <td style="font-weight:600; color:var(--accent-blue)">${item.key}</td>
-                            <td>${item.type}</td>
-                        </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+        <!-- VIEW: Recent Activity (Default) -->
+        <div id="view-recent" class="view-section active-view">
+            <div class="card">
+                <div class="card-title">Recent Activity</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Time</th><th>Agent</th><th>Action</th><th>Key</th><th>Type</th></tr></thead>
+                        <tbody>
+                            ${data.recentActivity.map((item: any) => `
+                            <tr>
+                                <td>${new Date(item.time).toLocaleTimeString()}</td>
+                                <td><span class="agent-badge">${item.agent}</span></td>
+                                <td>${item.action}</td>
+                                <td style="font-weight:600; color:var(--accent-blue)">${item.key}</td>
+                                <td>${item.type}</td>
+                            </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
+
+        <!-- VIEW: Projects List -->
+        <div id="view-projects" class="view-section">
+            <div class="card">
+                <div class="card-title">Projects Overview</div>
+                <div class="table-container">
+                    <table>
+                        <thead><tr><th>Project Name</th><th>Memories</th><th>Active Agents</th><th>Last Active</th></tr></thead>
+                        <tbody>
+                             ${data.projects.map((p: any) => `
+                            <tr>
+                                <td style="font-weight:bold; color:var(--text-primary)">${p.name}</td>
+                                <td><span class="stat-number">${p.count}</span></td>
+                                <td>${p.agents.map((a: string) => `<span class="agent-badge">${a}</span>`).join(' ')}</td>
+                                <td>${new Date(p.lastActive).toLocaleDateString()}</td>
+                            </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW: Agents (Simulated Detail) -->
+        <div id="view-agents" class="view-section">
+            <div class="card">
+                <div class="card-title">Agents Breakdown</div>
+                <div style="padding: 20px; color: var(--text-secondary);">
+                    Detailed breakdown of agent interactions and permissions coming soon.
+                    <br><br>
+                    Currently tracking behavior for: 
+                    ${data.projects.flatMap((p: any) => p.agents).filter((v: any, i: any, a: any) => a.indexOf(v) === i).join(', ')}
+                </div>
+            </div>
+        </div>
+
+        <!-- VIEW: Tokens -->
+        <div id="view-tokens" class="view-section">
+             <div class="card">
+                <div class="card-title">Token Usage</div>
+                <div style="display:flex; justify-content:space-around; text-align:center; margin-top:20px;">
+                    <div>
+                        <div style="font-size:12px; text-transform:uppercase; color:var(--text-secondary)">Read Tokens</div>
+                        <div style="font-size:40px; font-weight:800; color:var(--accent-blue)">${(data.overview.totalTokensRead / 1000).toFixed(1)}k</div>
+                    </div>
+                    <div>
+                         <div style="font-size:12px; text-transform:uppercase; color:var(--text-secondary)">Written Tokens</div>
+                        <div style="font-size:40px; font-weight:800; color:var(--accent-purple)">${(data.overview.totalTokensWritten / 1000).toFixed(1)}k</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script>
+        // Data for charts
         const agentData = ${JSON.stringify(data.agentActivity)};
         const typeData = ${JSON.stringify(data.memoryTypes)};
 
-        // Claymorphism Chart Configs
+        // View Switching Logic
+        function switchView(viewId, cardId) {
+            // Hide all views
+            document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active-view'));
+            // Remove active class from all cards
+            document.querySelectorAll('.stat-card').forEach(el => el.classList.remove('active'));
+
+            // Show target view
+            document.getElementById('view-' + viewId).classList.add('active-view');
+            // Highlight target card
+            if(cardId) document.getElementById(cardId).classList.add('active');
+        }
+
+        // Initialize default state
+        switchView('recent', 'card-memories');
+
+        // Chart Config
         Chart.defaults.color = '#a0a0b8';
         Chart.defaults.font.family = 'Nunito';
 
