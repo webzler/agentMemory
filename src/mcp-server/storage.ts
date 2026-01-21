@@ -30,6 +30,10 @@ export class StorageManager {
         this.baseDataPath = baseDataPath;
     }
 
+    public get baseDir(): string {
+        return this.baseDataPath;
+    }
+
     /**
      * Get or create a Keyv store for a specific project
      */

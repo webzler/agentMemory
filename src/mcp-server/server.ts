@@ -5,6 +5,7 @@ import { CacheManager } from './cache';
 import { MCPTools } from './tools';
 import { SocketBridge } from './socket-bridge';
 import { MemoryBankSync } from './memory-bank-sync';
+import { StandaloneDashboard } from '../standalone-dashboard';
 
 interface MCPRequest {
     jsonrpc: string;
@@ -232,3 +233,7 @@ server.start();
 // Also start Unix socket bridge for KiloCode
 const socketBridge = new SocketBridge(projectId);
 socketBridge.start((req) => server.handleRequest(req));
+
+// Start Dashboard
+const dashboard = new StandaloneDashboard(workspacePath);
+dashboard.start();

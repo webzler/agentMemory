@@ -2,6 +2,8 @@ import { StorageManager } from './storage';
 import { CacheManager } from './cache';
 import { MemoryBankSync } from './memory-bank-sync';
 import { v4 as uuidv4 } from 'uuid';
+import * as fs from 'fs';
+import * as path from 'path';
 
 interface Memory {
     id: string;
@@ -153,6 +155,76 @@ export class MCPTools {
     async project_init(params: ToolCallParams): Promise<{ success: boolean; projectId: string }> {
         const { projectId } = params;
         await this.storage.initProject(projectId);
+
+        // Auto-create .agent structure if it doesn't exist (Antigravity support)
+        // We need to resolve the workspace path. Since we don't have it passed explicitly in params, 
+        // we'll rely on the storage manager's base path or try to infer it. 
+        // Ideally, we should pass workspacePath to project_init.
+        // For now, let's assume storage manager knows where the root is.
+        // Or better yet, let's update call args to include workspacePath if possible, 
+        // but for safety, we'll try to use the parent of .agentMemory if available.
+
+        try {
+            // @ts-ignore
+            const storagePath = this.storage.baseDir;
+            console.error('[project_init] Storage path:', storagePath);
+
+            if (storagePath) {
+                const projectRoot = path.dirname(storagePath); // Parent of .agentMemory
+                console.error('[project_init] Project root:', projectRoot);
+
+                const agentDir = path.join(projectRoot, '.agent');
+                const workflowsDir = path.join(agentDir, 'workflows');
+
+                if (!fs.existsSync(workflowsDir)) {
+                    fs.mkdirSync(workflowsDir, { recursive: true });
+                }
+
+                const workflowFile = path.join(workflowsDir, 'update-memory.md');
+                if (!fs.existsSync(workflowFile)) {
+                    const workflowContent = `---
+description: How to update the project memory bank with new findings
+---
+
+# Update Memory Bank
+
+Follow this workflow to document important architectural decisions, patterns, or features.
+
+1. **Search First**: Check if a similar memory already exists.
+   \`\`\`bash
+   # Use the memory_search tool
+   memory_search({ "query": "<topic>" })
+   \`\`\`
+
+2. **Decide Action**:
+   - If it's **new**, use \`memory_write\`.
+   - If it **exists** but needs updates, use \`memory_update\` (or \`memory_write\` with the same key to overwrite).
+
+3. **Write Memory**:
+   Use the \`memory_write\` tool. Ensure you provide meaningful tags.
+   - \`type\`: Choose one of \`architecture\`, \`pattern\`, \`decision\`, \`feature\`.
+   - \`key\`: A unique, kebab-case identifier (e.g., \`auth-flow-v2\`).
+   
+   Example:
+   \`\`\`javascript
+   memory_write({
+     "key": "feature-x-impl",
+     "type": "feature",
+     "content": "# Feature X\\n\\nImplementation details...",
+     "tags": ["frontend", "react"]
+   })
+   \`\`\`
+
+4. **Verify**: Run \`memory_stats\` to confirm the total memory count increased or changed as expected.
+`;
+                    fs.writeFileSync(workflowFile, workflowContent);
+                }
+            }
+        } catch (error) {
+            console.error('[project_init] Failed to scaffold .agent directory:', error);
+            // Don't fail the init, just log the error
+        }
+
         return { success: true, projectId };
     }
 

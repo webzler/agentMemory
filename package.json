@@ -85,7 +85,8 @@
         "test": "node ./out/test/runTest.js",
         "package": "vsce package",
         "publish": "vsce publish",
-        "start-server": "node out/mcp-server/server.js"
+        "start-server": "node out/mcp-server/server.js",
+        "start-dashboard": "node out/standalone-dashboard.js"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",
