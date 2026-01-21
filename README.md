@@ -9,6 +9,15 @@ Seamlessly integrate with KiloCode, Cline, and RooCode's built-in memory banks w
 
 ---
 
+
+## 🚀 Now Available as an Antigravity Skill!
+
+agentMemory is now fully compatible with **Antigravity**. Use it as a skill to give your agents persistent, searchable memory that syncs with your project documentation.
+
+See [SKILL.md](SKILL.md) for usage instructions.
+
+---
+
 ## 🎯 What Makes agentMemory Different?
 
 **KiloCode, Cline, and RooCode already have memory banks** - but they're **manual and limited**.
@@ -21,14 +30,15 @@ Seamlessly integrate with KiloCode, Cline, and RooCode's built-in memory banks w
 .roo/memory-bank/                ← No search capability
 ```
 
-**Limitations:**
-- ❌ Manual updates required
-- ❌ No search functionality
-- ❌ No analytics or visualization
-- ❌ No cross-project queries
-- ❌ No programmatic access
+**The Problem with Native Memory Banks:**
+- ❌ **Manual Maintenance**: Agents must manually rewrite files to update memory.
+- ❌ **No Search**: Agents must read entire files to find specific information.
+- ❌ **No Analytics**: No way to track memory growth or patterns over time.
+- ❌ **Isolated**: Memories are locked to a single project.
 
-### agentMemory Enhancement
+### ✅ The Solution: agentMemory
+
+agentMemory **fixes these limitations** by upgrading your memory bank with:
 
 ```
 .agentMemory/                    ← Our structured database
