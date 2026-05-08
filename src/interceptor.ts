@@ -37,6 +37,11 @@ export class InterceptorManager {
         if (installedAgents.includes('continue')) {
             promises.push(this.injectContinueConfig(workspacePath));
         }
+        if (installedAgents.includes('opencode')) {
+            promises.push(this.injectOpenCodeRules(workspacePath));
+            promises.push(this.injectOpenCodeCommands(workspacePath));
+            promises.push(this.injectOpenCodeMCPConfig(workspacePath));
+        }
 
         await Promise.all(promises);
 
@@ -60,6 +65,25 @@ export class InterceptorManager {
             if (extension) {
                 installed.push(agent);
                 this.outputChannel.appendLine(`  ✅ ${agent}: ${extensionId}`);
+            }
+        }
+
+        // Detect OpenCode by checking for opencode.json or .opencode/ directory
+        const workspacePath = this.workspaceFolder.uri.fsPath;
+        const opencodeConfigPath = path.join(workspacePath, 'opencode.json');
+        const opencodeDirPath = path.join(workspacePath, '.opencode');
+
+        try {
+            await fs.access(opencodeConfigPath);
+            installed.push('opencode');
+            this.outputChannel.appendLine(`  ✅ opencode: opencode.json found`);
+        } catch {
+            try {
+                await fs.access(opencodeDirPath);
+                installed.push('opencode');
+                this.outputChannel.appendLine(`  ✅ opencode: .opencode/ directory found`);
+            } catch {
+                // OpenCode not detected
             }
         }
 
@@ -389,6 +413,175 @@ This project uses agentMemory for persistent knowledge management.
             this.outputChannel.appendLine(`  📄 Created: .roo/memory-bank/activeContext.md`);
         } catch (error) {
             this.outputChannel.appendLine(`  ❌ Failed to create RooCode memory bank files`);
+        }
+    }
+
+    /**
+     * Inject memory instructions into AGENTS.md for OpenCode.
+     * OpenCode reads AGENTS.md at session start for project rules.
+     * Keeps AGENTS.md clean — only instructions, no operational data.
+     */
+    private async injectOpenCodeRules(workspacePath: string): Promise<void> {
+        const agentsMdPath = path.join(workspacePath, 'AGENTS.md');
+        const memorySection = `## agentMemory
+
+This project uses agentMemory for persistent knowledge management.
+
+### Episodic Memory
+
+Project decisions, patterns, and context are stored in \`.opencode/memory-context.md\`.
+
+**Before starting any task:** Read \`.opencode/memory-context.md\` to load recent project context.
+**After significant work:** Use \`agentmemory_memory_write\` to persist new knowledge. Entries sync to the context file automatically.
+
+The context file is a sliding window of the 25 most recent memories (newest first). Older entries are pruned automatically — full history remains searchable via \`agentmemory_memory_search\`.
+
+### Available Tools (MCP server: agentmemory)
+
+- \`agentmemory_memory_search\` — Search all memories by query, type, or tags
+- \`agentmemory_memory_write\` — Save new memory (key, type, content, tags)
+- \`agentmemory_memory_read\` — Retrieve specific memory by key
+- \`agentmemory_memory_list\` — List memories by type
+- \`agentmemory_memory_update\` — Update existing memory
+- \`agentmemory_memory_stats\` — View memory usage statistics
+
+`;
+
+        try {
+            let existing = '';
+            try {
+                existing = await fs.readFile(agentsMdPath, 'utf-8');
+            } catch {
+                // File doesn't exist yet
+            }
+
+            if (existing.includes('## agentMemory')) {
+                this.outputChannel.appendLine(`  ℹ️  AGENTS.md already contains agentMemory section`);
+                return;
+            }
+
+            if (existing.trim()) {
+                // Append to existing AGENTS.md
+                await fs.writeFile(agentsMdPath, existing.trimEnd() + '\n\n' + memorySection, 'utf-8');
+                this.outputChannel.appendLine(`  📄 Updated: AGENTS.md with agentMemory rules`);
+            } else {
+                // Create new AGENTS.md
+                const header = `# AGENTS.md\n\nInstructions for AI coding agents working on this project.\n\n`;
+                await fs.writeFile(agentsMdPath, header + memorySection, 'utf-8');
+                this.outputChannel.appendLine(`  📄 Created: AGENTS.md with agentMemory rules`);
+            }
+        } catch (error) {
+            this.outputChannel.appendLine(`  ❌ Failed to create/update AGENTS.md`);
+        }
+    }
+
+    /**
+     * Create OpenCode custom commands for memory operations.
+     * These appear as /memory-search and /memory-write in the TUI.
+     */
+    private async injectOpenCodeCommands(workspacePath: string): Promise<void> {
+        const commandsDir = path.join(workspacePath, '.opencode', 'commands');
+
+        const memorySearchCommand = `---
+description: Search project memories for relevant context
+---
+Search the agentMemory system for context relevant to: $ARGUMENTS
+
+Use the \`agentmemory_memory_search\` tool with the query "$ARGUMENTS".
+
+If results are found:
+1. Summarize each memory's key information
+2. Note the memory type and tags
+3. Suggest how the findings relate to the current task
+
+If no results are found:
+- Suggest alternative search terms
+- Consider if this is new knowledge that should be documented
+`;
+
+        const memoryWriteCommand = `---
+description: Save findings to project memory
+---
+Document the following in the agentMemory system: $ARGUMENTS
+
+Use the \`agentmemory_memory_write\` tool with:
+- \`key\`: A unique kebab-case identifier derived from the topic
+- \`type\`: Choose from architecture, pattern, feature, api, bug, decision
+- \`content\`: Detailed markdown documentation of the finding
+- \`tags\`: Relevant keywords for searchability (e.g., ["auth", "security", "backend"])
+
+After writing, confirm the memory was saved successfully.
+`;
+
+        const memoryReviewCommand = `---
+description: Review all project memories and summarize patterns
+---
+List all memories in the project using \`agentmemory_memory_stats\` and \`agentmemory_memory_list\`.
+
+Then summarize:
+1. Total number of memories by type
+2. Most frequently accessed memories
+3. Recent additions
+4. Coverage gaps (areas with no memories)
+
+This helps identify knowledge gaps in the project documentation.
+`;
+
+        try {
+            await fs.mkdir(commandsDir, { recursive: true });
+            await fs.writeFile(path.join(commandsDir, 'memory-search.md'), memorySearchCommand, 'utf-8');
+            await fs.writeFile(path.join(commandsDir, 'memory-write.md'), memoryWriteCommand, 'utf-8');
+            await fs.writeFile(path.join(commandsDir, 'memory-review.md'), memoryReviewCommand, 'utf-8');
+            this.outputChannel.appendLine(`  📄 Created: .opencode/commands/memory-search.md`);
+            this.outputChannel.appendLine(`  📄 Created: .opencode/commands/memory-write.md`);
+            this.outputChannel.appendLine(`  📄 Created: .opencode/commands/memory-review.md`);
+        } catch (error) {
+            this.outputChannel.appendLine(`  ❌ Failed to create OpenCode commands`);
+        }
+    }
+
+    /**
+     * Inject agentMemory MCP server config into opencode.json.
+     * Adds the local MCP server so OpenCode can use memory tools.
+     */
+    private async injectOpenCodeMCPConfig(workspacePath: string): Promise<void> {
+        const configPath = path.join(workspacePath, 'opencode.json');
+
+        const serverPath = path.join(
+            this.workspaceFolder.uri.fsPath,
+            '..', '..', '.agents', 'skills', 'agent-memory', 'out', 'mcp-server', 'server.js'
+        );
+
+        const projectId = path.basename(workspacePath);
+
+        try {
+            let config: any = {};
+            try {
+                const content = await fs.readFile(configPath, 'utf-8');
+                config = JSON.parse(content);
+            } catch {
+                // File doesn't exist, start fresh
+            }
+
+            if (!config.mcp) {
+                config.mcp = {};
+            }
+
+            if (config.mcp.agentmemory) {
+                this.outputChannel.appendLine(`  ℹ️  opencode.json already has agentmemory MCP config`);
+                return;
+            }
+
+            config.mcp.agentmemory = {
+                type: 'local',
+                command: ['node', serverPath, projectId, workspacePath],
+                enabled: true
+            };
+
+            await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+            this.outputChannel.appendLine(`  📄 Updated: opencode.json with agentmemory MCP server`);
+        } catch (error) {
+            this.outputChannel.appendLine(`  ❌ Failed to update opencode.json`);
         }
     }
 

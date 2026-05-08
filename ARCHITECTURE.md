@@ -125,7 +125,7 @@ Rather than replacing existing memory bank systems, agentMemory **enhances** the
 - Bi-directional sync engine
 - Parses markdown files from agents' memory banks
 - Exports MCP memories to markdown format
-- Supports KiloCode, Cline, and RooCode
+- Supports KiloCode, Cline, RooCode, and OpenCode
 
 **File Mapping:**
 ```typescript
@@ -152,6 +152,14 @@ RooCode: .roo/memory-bank/
   techContext.md → decision
   progress.md → feature
   decisionLog.md → decision
+
+OpenCode: .opencode/memory-bank/
+  architecture.md → architecture
+  patterns.md → pattern
+  decisions.md → decision
+  features.md → feature
+
+OpenCode also syncs to AGENTS.md (project root) for session-start context.
 ```
 
 ### 3. Configuration Management (`src/config.ts`)
@@ -164,9 +172,17 @@ RooCode: .roo/memory-bank/
 **Agent Detection:**
 ```typescript
 detectInstalledAgents(): string[] {
-  // Checks for:
+  // Checks for VS Code extensions:
   // - saoudrizwan.claude-dev (Cline)
   // - kilocode.kilo-code (KiloCode)
+  // - roo-cline.roo-cline (RooCode)
+  // - Continue.continue (Continue)
+  
+  // Also checks for OpenCode by file system:
+  // - opencode.json in workspace root
+  // - .opencode/ directory in workspace
+}
+```
   // - rooveterinaryinc.roo-cline (RooCode)
 }
 ```

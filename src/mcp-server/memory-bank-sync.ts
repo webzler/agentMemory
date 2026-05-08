@@ -73,6 +73,16 @@ export class MemoryBankSync {
                 'progress.md': { type: 'feature', tags: ['progress', 'tracking'] },
                 'decisionLog.md': { type: 'decision', tags: ['decisions', 'log'] }
             }
+        },
+        {
+            name: 'opencode',
+            memoryBankPath: '.opencode/memory-bank',
+            fileMapping: {
+                'architecture.md': { type: 'architecture', tags: ['design', 'system', 'opencode'] },
+                'patterns.md': { type: 'pattern', tags: ['patterns', 'design', 'opencode'] },
+                'decisions.md': { type: 'decision', tags: ['decisions', 'tech', 'opencode'] },
+                'features.md': { type: 'feature', tags: ['features', 'product', 'opencode'] }
+            }
         }
     ];
 
@@ -333,6 +343,144 @@ As you work on this project, document:
             if (!targetFile) continue;
 
             await this.appendToMarkdown(memory, agent, targetFile);
+        }
+
+        // Sync to episodic memory file + ensure AGENTS.md has instructions
+        await this.syncToMemoryContext(memory);
+        await this.ensureAgentsMDInstructions();
+    }
+
+    /**
+     * Maximum number of episodic memory entries to keep in memory-context.md
+     */
+    private static readonly MAX_MEMORY_CONTEXT_ENTRIES = 25;
+
+    /**
+     * Write memory summary to .opencode/memory-context.md (episodic memory).
+     * Prunes to MAX_MEMORY_CONTEXT_ENTRIES by keeping the most recent entries.
+     */
+    private async syncToMemoryContext(memory: Memory): Promise<void> {
+        const memoryContextDir = path.join(this.workspacePath, '.opencode');
+        const memoryContextPath = path.join(memoryContextDir, 'memory-context.md');
+
+        const entry = `### ${memory.key}\n- **Type:** ${memory.type}\n- **Tags:** ${memory.tags.join(', ')}\n- **Created:** ${new Date(memory.createdAt).toISOString()}\n- **Summary:** ${memory.content.substring(0, 200).replace(/\n/g, ' ').trim()}...\n`;
+
+        try {
+            await fs.mkdir(memoryContextDir, { recursive: true });
+
+            let existing = '';
+            try {
+                existing = await fs.readFile(memoryContextPath, 'utf-8');
+            } catch {
+                // File doesn't exist yet
+            }
+
+            // Check if this memory entry already exists
+            if (existing.includes(`### ${memory.key}\n`)) {
+                return;
+            }
+
+            const header = `# Episodic Memory\n\nProject knowledge base synced by agentMemory.\nNewest entries first. Max ${MemoryBankSync.MAX_MEMORY_CONTEXT_ENTRIES} entries.\n\n`;
+
+            // Build new content
+            let content: string;
+            if (existing.trim()) {
+                // Insert new entry right after the header, before existing entries
+                const headerEnd = existing.indexOf('### ');
+                if (headerEnd === -1) {
+                    content = header + entry + '\n' + existing;
+                } else {
+                    content = existing.substring(0, headerEnd) + entry + '\n' + existing.substring(headerEnd);
+                }
+            } else {
+                content = header + entry;
+            }
+
+            // Prune: keep only the first MAX_MEMORY_CONTEXT_ENTRIES
+            const lines = content.split('\n');
+            const entryHeaders: number[] = [];
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith('### ')) {
+                    entryHeaders.push(i);
+                }
+            }
+
+            if (entryHeaders.length > MemoryBankSync.MAX_MEMORY_CONTEXT_ENTRIES) {
+                // Find where the 25th entry ends
+                const keepUntil = entryHeaders[MemoryBankSync.MAX_MEMORY_CONTEXT_ENTRIES];
+                // Find the end of the last kept entry (next ### or end of file)
+                let endOfLastKept = lines.length;
+                for (let i = keepUntil; i < lines.length; i++) {
+                    if (lines[i].startsWith('### ') && i > keepUntil) {
+                        endOfLastKept = i;
+                        break;
+                    }
+                }
+                content = lines.slice(0, endOfLastKept).join('\n').trimEnd() + '\n';
+                console.error(`[MemoryBankSync] Pruned episodic memory to ${MemoryBankSync.MAX_MEMORY_CONTEXT_ENTRIES} entries`);
+            }
+
+            await fs.writeFile(memoryContextPath, content, 'utf-8');
+            console.error(`[MemoryBankSync] ✓ Synced ${memory.key} to .opencode/memory-context.md`);
+        } catch (error) {
+            console.error(`[MemoryBankSync] Failed to sync memory context: ${error}`);
+        }
+    }
+
+    /**
+     * Ensure AGENTS.md has a reference to .opencode/memory-context.md.
+     * AGENTS.md stays clean — only instructions, no operational data.
+     */
+    private async ensureAgentsMDInstructions(): Promise<void> {
+        const agentsMdPath = path.join(this.workspacePath, 'AGENTS.md');
+
+        const memorySection = `## agentMemory
+
+This project uses agentMemory for persistent knowledge management.
+
+### Episodic Memory
+
+Project decisions, patterns, and context are stored in \`.opencode/memory-context.md\`.
+
+**Before starting any task:** Read \`.opencode/memory-context.md\` to load recent project context.
+**After significant work:** Use \`agentmemory_memory_write\` to persist new knowledge. Entries sync to the context file automatically.
+
+The context file is a sliding window of the 25 most recent memories (newest first). Older entries are pruned automatically — full history remains searchable via \`agentmemory_memory_search\`.
+
+### Available Tools (MCP server: agentmemory)
+
+- \`agentmemory_memory_search\` — Search all memories by query, type, or tags
+- \`agentmemory_memory_write\` — Save new memory (key, type, content, tags)
+- \`agentmemory_memory_read\` — Retrieve specific memory by key
+- \`agentmemory_memory_list\` — List memories by type
+- \`agentmemory_memory_update\` — Update existing memory
+- \`agentmemory_memory_stats\` — View memory usage statistics
+
+`;
+
+        try {
+            let existing = '';
+            try {
+                existing = await fs.readFile(agentsMdPath, 'utf-8');
+            } catch {
+                // File doesn't exist yet
+            }
+
+            // Already has agentMemory section — skip
+            if (existing.includes('## agentMemory')) {
+                return;
+            }
+
+            if (existing.trim()) {
+                await fs.writeFile(agentsMdPath, existing.trimEnd() + '\n\n' + memorySection, 'utf-8');
+                console.error(`[MemoryBankSync] ✓ Updated AGENTS.md with agentMemory instructions`);
+            } else {
+                const header = `# AGENTS.md\n\nInstructions for AI coding agents working on this project.\n\n`;
+                await fs.writeFile(agentsMdPath, header + memorySection, 'utf-8');
+                console.error(`[MemoryBankSync] ✓ Created AGENTS.md with agentMemory instructions`);
+            }
+        } catch (error) {
+            console.error(`[MemoryBankSync] Failed to update AGENTS.md: ${error}`);
         }
     }
 

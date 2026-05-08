@@ -153,11 +153,12 @@ memory_search({
 
 ### 🤖 Multi-Agent Support
 
-| Agent | Memory Bank Location | Sync Status |
-|-------|---------------------|-------------|
-| **KiloCode** | `.kilocode/rules/memory-bank/` | ✅ Full sync |
-| **Cline** | `.clinerules/memory-bank/` | ✅ Full sync |
-| **RooCode** | `.roo/memory-bank/` | ✅ Full sync |
+| Agent | Type | Memory Bank Location | Sync Status |
+|-------|------|---------------------|-------------|
+| **KiloCode** | VS Code Extension | `.kilocode/rules/memory-bank/` | ✅ Full sync |
+| **Cline** | VS Code Extension | `.clinerules/memory-bank/` | ✅ Full sync |
+| **RooCode** | VS Code Extension | `.roo/memory-bank/` | ✅ Full sync |
+| **OpenCode** | Terminal TUI | `AGENTS.md` + `.opencode/commands/` | ✅ Full sync |
 
 **Files Synced:**
 - `projectBrief.md` / `brief.md`
@@ -260,6 +261,16 @@ your-project/
 │   ├── uuid-002.json          # Memory: API patterns
 │   └── ...
 │
+├── AGENTS.md                  # OpenCode rules (auto-created)
+│
+├── opencode.json              # OpenCode MCP config (auto-created)
+│
+├── .opencode/
+│   └── commands/              # OpenCode custom commands (auto-created)
+│       ├── memory-search.md
+│       ├── memory-write.md
+│       └── memory-review.md
+│
 ├── .kilocode/rules/memory-bank/    # KiloCode memory bank
 │   ├── brief.md                    # ⬍ Synced with our database
 │   ├── architecture.md             # ⬍ Auto-updated
@@ -323,7 +334,7 @@ your-project/
 | **Search** | ✅ Fast indexed | ❌ No | ✅ Yes |
 | **Analytics** | ✅ Dashboard | ❌ No | ❌ No |
 | **Automation** | ✅ Auto-sync | ❌ Manual | ⚠️ Partial |
-| **Multi-Agent** | ✅ All 3 | ✅ Per-agent | ✅ All |
+| **Multi-Agent** | ✅ All 4 | ✅ Per-agent | ✅ All |
 | **Git-Friendly** | ✅ Yes | ✅ Yes | ⚠️ Depends |
 | **Cross-Project** | ✅ Yes | ❌ No | ❌ No |
 

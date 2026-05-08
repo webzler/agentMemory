@@ -34,6 +34,12 @@ export class ConfigManager {
 
         // Configure each agent's settings file
         for (const agent of installedAgents) {
+            // OpenCode uses opencode.json (handled by InterceptorManager), skip VS Code settings
+            if (agent === 'opencode') {
+                this.outputChannel.appendLine(`  ℹ️  opencode: configured via opencode.json (handled by interceptor)`);
+                continue;
+            }
+
             const settingsPath = this.getAgentSettingsPath(agent);
             if (!settingsPath) {
                 this.outputChannel.appendLine(`⚠️  Unknown settings path for ${agent}`);
@@ -114,6 +120,23 @@ export class ConfigManager {
             const extension = vscode.extensions.getExtension(extensionId);
             if (extension) {
                 installed.push(agent);
+            }
+        }
+
+        // Detect OpenCode by checking for opencode.json or .opencode/ directory
+        const workspacePath = this.workspaceFolder.uri.fsPath;
+
+        try {
+            await fs.access(path.join(workspacePath, 'opencode.json'));
+            installed.push('opencode');
+            this.outputChannel.appendLine('  ✅ opencode: opencode.json found');
+        } catch {
+            try {
+                await fs.access(path.join(workspacePath, '.opencode'));
+                installed.push('opencode');
+                this.outputChannel.appendLine('  ✅ opencode: .opencode/ directory found');
+            } catch {
+                // OpenCode not detected
             }
         }
 
