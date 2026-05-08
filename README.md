@@ -2,10 +2,36 @@
 
 **Hybrid Memory System for AI Coding Agents**
 
-Seamlessly integrate with KiloCode, Cline, and RooCode's built-in memory banks while providing powerful search, analytics, and automation.
+Seamlessly integrate with KiloCode, Cline, RooCode, and OpenCode's built-in memory banks while providing powerful search, analytics, and automation.
 
 [![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/webzler.agentmemory?label=VS%20Code%20Marketplace)](https://marketplace.visualstudio.com/)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/webzler.agentmemory)](https://marketplace.visualstudio.com/)
+
+---
+
+## 📢 Latest Release Highlights
+
+### v0.2.0 — Agent Selector & OpenCode Support
+
+**🎯 Agent Selection (New in v0.2.0)**
+- You can now **choose which coding agents** to sync with instead of having all agents configured at once.
+- Memory bank files are only created for the agents you actively use, keeping your project directory clean and uncluttered.
+- Supports selection via:
+  - **VS Code Extension** — `showQuickPick` multi-select during setup
+  - **SKILL.md / Terminal** — Interactive readline prompt or `--agents` CLI flag
+  - **MCP Tool** — `configure_agents({ agents: "kilocode,opencode" })` anytime
+
+**🤖 OpenCode Support (Added in v0.2.0)**
+- Full compatibility with the **OpenCode** terminal-based agent.
+- Syncs to `.opencode/memory-bank/` and maintains `AGENTS.md` + `.opencode/commands/`.
+
+---
+
+## 🚀 Now Available as an Antigravity Skill!
+
+agentMemory is now fully compatible with **Antigravity**. Use it as a skill to give your agents persistent, searchable memory that syncs with your project documentation.
+
+See [SKILL.md](SKILL.md) for usage instructions.
 
 ---
 
@@ -153,13 +179,22 @@ memory_search({
 
 ### 🤖 Multi-Agent Support
 
-| Agent | Memory Bank Location | Sync Status |
-|-------|---------------------|-------------|
-| **KiloCode** | `.kilocode/rules/memory-bank/` | ✅ Full sync |
-| **Cline** | `.clinerules/memory-bank/` | ✅ Full sync |
-| **RooCode** | `.roo/memory-bank/` | ✅ Full sync |
+| Agent | Type | Memory Bank Location | Sync Status |
+|-------|------|---------------------|-------------|
+| **KiloCode** | VS Code Extension | `.kilocode/rules/memory-bank/` | ✅ Selectable |
+| **Cline** | VS Code Extension | `.clinerules/memory-bank/` | ✅ Selectable |
+| **RooCode** | VS Code Extension | `.roo/memory-bank/` | ✅ Selectable |
+| **OpenCode** | Terminal TUI | `AGENTS.md` + `.opencode/commands/` | ✅ Selectable |
 
-**Files Synced:**
+**You choose which agents to sync.** Only selected agents receive:
+- Memory bank directories
+- MCP settings
+- Synced markdown files
+- `opencode.json` (OpenCode only)
+
+Use `configure_agents({ agents: "kilocode,opencode" })` to change your selection anytime.
+
+**Files Synced (for selected agents only):**
 - `projectBrief.md` / `brief.md`
 - `architecture.md` / `systemPatterns.md`
 - `productContext.md` / `product.md`
@@ -180,9 +215,10 @@ memory_search({
 4. Reload VS Code
 
 **That's it!** The extension will:
+- ✅ Ask which agents to sync with (via QuickPick)
 - ✅ Create MCP server configuration
-- ✅ Inject memory-first instructions into memory banks
-- ✅ Start bi-directional sync
+- ✅ Inject memory-first instructions into selected memory banks
+- ✅ Start bi-directional sync with **only** selected agents
 - ✅ Enable dashboard
 
 ### Manual Installation
@@ -243,39 +279,52 @@ Agents treat this as **project architecture** and follow it automatically.
 | `memory_list` | List by type | Show all architecture decisions |
 | `memory_update` | Modify existing | Append to existing pattern |
 | `memory_stats` | View analytics | Usage statistics |
+| `configure_agents` | Change agent selection | `configure_agents({ agents: "kilocode,opencode" })` |
 
 ---
 
 ## � Project Structure
 
-After installation, your project will have:
+After installation, your project will have (only for **selected** agents):
 
 ```
 your-project/
 ├── .vscode/
 │   └── settings.json           # MCP server config (auto-created)
 │
-├── .agentMemory/               # Our structured storage
+├── .agentMemory/               # Our structured storage + config
 │   ├── uuid-001.json          # Memory: OAuth architecture
 │   ├── uuid-002.json          # Memory: API patterns
-│   └── ...
+│   └── agents.json            # Active agent configuration ⭐ NEW
 │
-├── .kilocode/rules/memory-bank/    # KiloCode memory bank
+├── AGENTS.md                  # OpenCode rules (auto-created if OpenCode selected)
+│
+├── opencode.json              # OpenCode MCP config (auto-created if selected)
+│
+├── .opencode/                 # ONLY if OpenCode is selected
+│   └── commands/              # OpenCode custom commands
+│       ├── memory-search.md
+│       ├── memory-write.md
+│       └── memory-review.md
+│
+├── .kilocode/rules/memory-bank/    # ONLY if KiloCode is selected
 │   ├── brief.md                    # ⬍ Synced with our database
 │   ├── architecture.md             # ⬍ Auto-updated
 │   ├── product.md                  # ⬍ Auto-updated
 │   └── tech.md                     # ⬍ Auto-updated
 │
-├── .clinerules/memory-bank/        # Cline memory bank
+├── .clinerules/memory-bank/        # ONLY if Cline is selected
 │   ├── projectBrief.md             # ⬍ Synced
 │   ├── systemPatterns.md           # ⬍ Synced
 │   └── ...                         # ⬍ Synced
 │
-└── .roo/memory-bank/               # RooCode memory bank
+└── .roo/memory-bank/               # ONLY if RooCode is selected
     ├── projectBrief.md             # ⬍ Synced
     ├── decisionLog.md              # ⬍ Synced
     └── ...                         # ⬍ Synced
 ```
+
+**Only the agents you select get directories and files created!** This keeps your project clean.
 
 **All markdown files stay human-readable and git-friendly!**
 
@@ -323,7 +372,7 @@ your-project/
 | **Search** | ✅ Fast indexed | ❌ No | ✅ Yes |
 | **Analytics** | ✅ Dashboard | ❌ No | ❌ No |
 | **Automation** | ✅ Auto-sync | ❌ Manual | ⚠️ Partial |
-| **Multi-Agent** | ✅ All 3 | ✅ Per-agent | ✅ All |
+| **Multi-Agent** | ✅ All 4 | ✅ Per-agent | ✅ All |
 | **Git-Friendly** | ✅ Yes | ✅ Yes | ⚠️ Depends |
 | **Cross-Project** | ✅ Yes | ❌ No | ❌ No |
 

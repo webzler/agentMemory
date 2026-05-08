@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as fsCallback from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { AgentConfig, ALL_AGENTS, AgentName } from './agent-config';
 
 interface Memory {
     id: string;
@@ -23,72 +24,55 @@ interface Memory {
     updatedAt: number;
 }
 
-interface AgentConfig {
+interface AgentFileMappingConfig {
     name: string;
     memoryBankPath: string;
     fileMapping: Record<string, { type: Memory['type']; tags: string[] }>;
 }
 
 /**
- * Bi-directional sync between agent memory bank files and MCP storage
+ * Bi-directional sync between agent memory bank files and MCP storage,
+ * respecting the user's agent selection in .agentMemory/agents.json.
  */
 export class MemoryBankSync {
     private workspacePath: string;
     private mcpDataPath: string;
-
-    // Multi-agent configuration
-    private agents: AgentConfig[] = [
-        {
-            name: 'kilocode',
-            memoryBankPath: '.kilocode/rules/memory-bank',
-            fileMapping: {
-                'brief.md': { type: 'architecture', tags: ['overview', 'project'] },
-                'product.md': { type: 'feature', tags: ['product', 'features'] },
-                'context.md': { type: 'bug', tags: ['context', 'issues'] },
-                'architecture.md': { type: 'architecture', tags: ['design', 'system'] },
-                'tech.md': { type: 'decision', tags: ['technology', 'stack'] }
-            }
-        },
-        {
-            name: 'cline',
-            memoryBankPath: '.clinerules/memory-bank',
-            fileMapping: {
-                'projectBrief.md': { type: 'architecture', tags: ['overview', 'project'] },
-                'productContext.md': { type: 'feature', tags: ['product', 'goals'] },
-                'activeContext.md': { type: 'pattern', tags: ['current', 'focus'] },
-                'systemPatterns.md': { type: 'pattern', tags: ['patterns', 'design'] },
-                'techContext.md': { type: 'decision', tags: ['technology', 'decisions'] },
-                'progress.md': { type: 'feature', tags: ['progress', 'status'] }
-            }
-        },
-        {
-            name: 'roocode',
-            memoryBankPath: '.roo/memory-bank',
-            fileMapping: {
-                'projectBrief.md': { type: 'architecture', tags: ['overview', 'project'] },
-                'productContext.md': { type: 'feature', tags: ['product', 'vision'] },
-                'activeContext.md': { type: 'pattern', tags: ['current', 'work'] },
-                'systemPatterns.md': { type: 'pattern', tags: ['patterns', 'architecture'] },
-                'techContext.md': { type: 'decision', tags: ['technology', 'stack'] },
-                'progress.md': { type: 'feature', tags: ['progress', 'tracking'] },
-                'decisionLog.md': { type: 'decision', tags: ['decisions', 'log'] }
-            }
-        }
-    ];
+    private agentConfig: AgentConfig;
 
     constructor(workspacePath: string, mcpDataPath: string = '.agentMemory') {
         this.workspacePath = workspacePath;
         this.mcpDataPath = path.join(workspacePath, mcpDataPath);
+        this.agentConfig = new AgentConfig(workspacePath);
+    }
+
+    private getActiveAgents(): AgentFileMappingConfig[] {
+        const activeNames = this.agentConfig.getActiveAgents();
+        if (activeNames.length === 0) {
+            console.error('[MemoryBankSync] No agents configured. Use configure_agents tool or select agents during setup.');
+            return [];
+        }
+        return activeNames.map(name => ({
+            name: ALL_AGENTS[name].name,
+            memoryBankPath: ALL_AGENTS[name].memoryBankPath,
+            fileMapping: ALL_AGENTS[name].fileMapping
+        }));
     }
 
     /**
-     * Import all memory bank files from all agents into MCP storage
+     * Import all memory bank files from selected agents into MCP storage
      */
     async importAll(): Promise<void> {
-        console.error('[MemoryBankSync] Starting import from all agents...');
+        const agents = this.getActiveAgents();
+        if (agents.length === 0) {
+            console.error('[MemoryBankSync] No active agents to import from. Run configure_agents to select agents.');
+            await this.initializeProject();
+            return;
+        }
+
+        console.error('[MemoryBankSync] Starting import from selected agents...');
 
         let totalImported = 0;
-        for (const agent of this.agents) {
+        for (const agent of agents) {
             totalImported += await this.importFromAgent(agent);
         }
 
@@ -104,7 +88,7 @@ export class MemoryBankSync {
      * Import memory bank files from a specific agent
      * Returns the number of memories imported
      */
-    private async importFromAgent(agent: AgentConfig): Promise<number> {
+    private async importFromAgent(agent: AgentFileMappingConfig): Promise<number> {
         const memoryBankDir = path.join(this.workspacePath, agent.memoryBankPath);
 
         try {
@@ -151,6 +135,8 @@ export class MemoryBankSync {
         console.error('[MemoryBankSync] Creating default project memory...');
 
         const projectName = path.basename(this.workspacePath);
+        const activeAgents = this.agentConfig.getActiveAgents();
+
         const defaultMemory: Memory = {
             id: uuidv4(),
             projectId: projectName,
@@ -158,7 +144,7 @@ export class MemoryBankSync {
             type: 'architecture',
             content: `# ${projectName} - Project Overview
 
-This project uses **agentMemory** for persistent knowledge management.
+This project uses **agentMemory** for persistent knowledge management.${activeAgents.length > 0 ? `\n\n**Active Agents:** ${activeAgents.map(a => ALL_AGENTS[a]?.fullName || a).join(', ')}` : ''}
 
 ## How It Works
 
@@ -199,7 +185,7 @@ As you work on this project, document:
         // Save to MCP storage
         await this.saveMCPMemory(defaultMemory);
 
-        // Export to all agent markdown files
+        // Export to all selected agent markdown files
         await this.exportToAgents(defaultMemory);
 
         console.error('[MemoryBankSync] ✅ Default project memory created and synced');
@@ -323,10 +309,12 @@ As you work on this project, document:
     }
 
     /**
-     * Export MCP memory to appropriate agent markdown files
+     * Export MCP memory to appropriate agent markdown files (only selected agents)
      */
     async exportToAgents(memory: Memory): Promise<void> {
-        for (const agent of this.agents) {
+        const agents = this.getActiveAgents();
+
+        for (const agent of agents) {
             // Find which file this memory type maps to
             const targetFile = this.getTargetFile(memory.type, agent);
 
@@ -334,12 +322,167 @@ As you work on this project, document:
 
             await this.appendToMarkdown(memory, agent, targetFile);
         }
+
+        // Sync to episodic memory file + ensure AGENTS.md has instructions
+        await this.syncToMemoryContext(memory);
+        await this.ensureAgentsMDInstructions();
+    }
+
+    /**
+     * Maximum number of episodic memory entries to keep in memory-context.md
+     */
+    private static readonly MAX_MEMORY_CONTEXT_ENTRIES = 25;
+
+    /**
+     * Write memory summary to .opencode/memory-context.md (episodic memory).
+     * Prunes to MAX_MEMORY_CONTEXT_ENTRIES by keeping the most recent entries.
+     */
+    private async syncToMemoryContext(memory: Memory): Promise<void> {
+        const memoryContextDir = path.join(this.workspacePath, '.opencode');
+        const memoryContextPath = path.join(memoryContextDir, 'memory-context.md');
+
+        const entry = `### ${memory.key}\n- **Type:** ${memory.type}\n- **Tags:** ${memory.tags.join(', ')}\n- **Created:** ${new Date(memory.createdAt).toISOString()}\n- **Summary:** ${memory.content.substring(0, 200).replace(/\n/g, ' ').trim()}...\n`;
+
+        try {
+            await fs.mkdir(memoryContextDir, { recursive: true });
+
+            let existing = '';
+            try {
+                existing = await fs.readFile(memoryContextPath, 'utf-8');
+            } catch {
+                // File doesn't exist yet
+            }
+
+            // Check if this memory entry already exists
+            if (existing.includes(`### ${memory.key}\n`)) {
+                return;
+            }
+
+            const header = `# Episodic Memory\n\nProject knowledge base synced by agentMemory.\nNewest entries first. Max ${MemoryBankSync.MAX_MEMORY_CONTEXT_ENTRIES} entries.\n\n`;
+
+            // Build new content
+            let content: string;
+            if (existing.trim()) {
+                // Insert new entry right after the header, before existing entries
+                const headerEnd = existing.indexOf('### ');
+                if (headerEnd === -1) {
+                    content = header + entry + '\n' + existing;
+                } else {
+                    content = existing.substring(0, headerEnd) + entry + '\n' + existing.substring(headerEnd);
+                }
+            } else {
+                content = header + entry;
+            }
+
+            // Prune: keep only the first MAX_MEMORY_CONTEXT_ENTRIES
+            const lines = content.split('\n');
+            const entryHeaders: number[] = [];
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith('### ')) {
+                    entryHeaders.push(i);
+                }
+            }
+
+            if (entryHeaders.length > MemoryBankSync.MAX_MEMORY_CONTEXT_ENTRIES) {
+                // Find where the 25th entry ends
+                const keepUntil = entryHeaders[MemoryBankSync.MAX_MEMORY_CONTEXT_ENTRIES];
+                // Find the end of the last kept entry (next ### or end of file)
+                let endOfLastKept = lines.length;
+                for (let i = keepUntil; i < lines.length; i++) {
+                    if (lines[i].startsWith('### ') && i > keepUntil) {
+                        endOfLastKept = i;
+                        break;
+                    }
+                }
+                content = lines.slice(0, endOfLastKept).join('\n').trimEnd() + '\n';
+                console.error(`[MemoryBankSync] Pruned episodic memory to ${MemoryBankSync.MAX_MEMORY_CONTEXT_ENTRIES} entries`);
+            }
+
+            await fs.writeFile(memoryContextPath, content, 'utf-8');
+            console.error(`[MemoryBankSync] ✓ Synced ${memory.key} to .opencode/memory-context.md`);
+        } catch (error) {
+            console.error(`[MemoryBankSync] Failed to sync memory context: ${error}`);
+        }
+    }
+
+    /**
+     * Ensure AGENTS.md has a reference to .opencode/memory-context.md.
+     * AGENTS.md stays clean — only instructions, no operational data.
+     */
+    private async ensureAgentsMDInstructions(): Promise<void> {
+        const agentsMdPath = path.join(this.workspacePath, 'AGENTS.md');
+        const activeAgents = this.agentConfig.getActiveAgents();
+        const activeAgentsText = activeAgents.length > 0
+            ? activeAgents.map(a => `| ${ALL_AGENTS[a]?.fullName || a} | ${ALL_AGENTS[a]?.memoryBankPath || 'N/A'} |`).join('\n')
+            : '| (none configured) | Run `configure_agents` to enable |';
+
+        const memorySection = `## agentMemory
+
+This project uses agentMemory for persistent knowledge management.
+
+### Active Agents
+
+| Agent | Memory Bank Path |
+|-------|-----------------|
+${activeAgentsText}
+
+### Episodic Memory
+
+Project decisions, patterns, and context are stored in \`.opencode/memory-context.md\`.
+
+**Before starting any task:** Read \`.opencode/memory-context.md\` to load recent project context.
+**After significant work:** Use \`agentmemory_memory_write\` to persist new knowledge. Entries sync to the context file automatically.
+
+The context file is a sliding window of the 25 most recent memories (newest first). Older entries are pruned automatically — full history remains searchable via \`agentmemory_memory_search\`.
+
+### Available Tools (MCP server: agentmemory)
+
+- \`agentmemory_memory_search\` — Search all memories by query, type, or tags
+- \`agentmemory_memory_write\` — Save new memory (key, type, content, tags)
+- \`agentmemory_memory_read\` — Retrieve specific memory by key
+- \`agentmemory_memory_list\` — List memories by type
+- \`agentmemory_memory_update\` — Update existing memory
+- \`agentmemory_memory_stats\` — View memory usage statistics
+- \`agentmemory_configure_agents\` — Configure which coding agents to sync with
+
+`;
+
+        try {
+            let existing = '';
+            try {
+                existing = await fs.readFile(agentsMdPath, 'utf-8');
+            } catch {
+                // File doesn't exist yet
+            }
+
+            // If the section already exists, replace it to keep agent list up to date
+            if (existing.includes('## agentMemory')) {
+                const regex = /## agentMemory[\s\S]*?(?=\n#{1,2} .|$)/;
+                const updated = existing.replace(regex, memorySection.trimEnd());
+                if (updated !== existing) {
+                    await fs.writeFile(agentsMdPath, updated.trimEnd() + '\n', 'utf-8');
+                    console.error(`[MemoryBankSync] ✓ Updated AGENTS.md with current active agents`);
+                }
+                return;
+            }
+
+            if (existing.trim()) {
+                await fs.writeFile(agentsMdPath, existing.trimEnd() + '\n\n' + memorySection, 'utf-8');
+                console.error(`[MemoryBankSync] ✓ Updated AGENTS.md with agentMemory instructions`);
+            } else {
+                const header = `# AGENTS.md\n\nInstructions for AI coding agents working on this project.\n\n`;
+                await fs.writeFile(agentsMdPath, header + memorySection, 'utf-8');
+                console.error(`[MemoryBankSync] ✓ Created AGENTS.md with agentMemory instructions`);
+            }
+        } catch (error) {
+            console.error(`[MemoryBankSync] Failed to update AGENTS.md: ${error}`);
+        }
     }
 
     /**
      * Get target markdown file for a memory type
      */
-    private getTargetFile(type: Memory['type'], agent: AgentConfig): string | null {
+    private getTargetFile(type: Memory['type'], agent: AgentFileMappingConfig): string | null {
         for (const [filename, config] of Object.entries(agent.fileMapping)) {
             if (config.type === type) {
                 return filename;
@@ -353,7 +496,7 @@ As you work on this project, document:
      */
     private async appendToMarkdown(
         memory: Memory,
-        agent: AgentConfig,
+        agent: AgentFileMappingConfig,
         filename: string
     ): Promise<void> {
         const memoryBankDir = path.join(this.workspacePath, agent.memoryBankPath);
@@ -436,8 +579,14 @@ ${memory.content}
     async startWatching(): Promise<void> {
         console.error('[MemoryBankSync] Starting file watching for memory bank sync...');
 
+        const agents = this.getActiveAgents();
+        if (agents.length === 0) {
+            console.error('[MemoryBankSync] No active agents to watch. Configure agents to enable file watching.');
+            return;
+        }
+
         // Watch each agent's memory bank directory
-        for (const agent of this.agents) {
+        for (const agent of agents) {
             const memoryBankPath = path.join(this.workspacePath, agent.memoryBankPath);
 
             try {

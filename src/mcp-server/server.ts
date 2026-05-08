@@ -5,6 +5,7 @@ import { CacheManager } from './cache';
 import { MCPTools } from './tools';
 import { SocketBridge } from './socket-bridge';
 import { MemoryBankSync } from './memory-bank-sync';
+import { AgentConfig } from './agent-config';
 import { StandaloneDashboard } from '../standalone-dashboard';
 
 interface MCPRequest {
@@ -26,6 +27,45 @@ interface MCPResponse {
 }
 
 /**
+ * Parse CLI arguments.
+ * Supported:
+ *   node server.js <projectId> <workspacePath> [--agents=kilocode,opencode]
+ */
+function parseArgs(): { projectId: string; workspacePath: string; agentsArg?: string } {
+    const args = process.argv.slice(2);
+    let projectId = 'default-project';
+    let workspacePath = process.cwd();
+    let agentsArg: string | undefined;
+
+    for (const arg of args) {
+        if (arg.startsWith('--agents=')) {
+            agentsArg = arg.split('=')[1];
+        } else if (arg.startsWith('--agents')) {
+            // Handle --agents val (next arg) could be done but keep simple
+            const eqIdx = arg.indexOf('=');
+            if (eqIdx !== -1) {
+                agentsArg = arg.substring(eqIdx + 1);
+            }
+        } else if (!projectId || projectId === 'default-project') {
+            // First positional = projectId
+            if (projectId === 'default-project' && arg !== workspacePath) {
+                projectId = arg;
+            }
+        } else {
+            // Second positional = workspacePath
+            workspacePath = arg;
+        }
+    }
+
+    // More robust positional parsing
+    const positional = args.filter(a => !a.startsWith('--'));
+    if (positional.length >= 1) projectId = positional[0];
+    if (positional.length >= 2) workspacePath = positional[1];
+
+    return { projectId, workspacePath, agentsArg };
+}
+
+/**
  * Simple MCP Server using stdio transport
  * This server implements the Model Context Protocol for memory tools
  */
@@ -35,9 +75,11 @@ class MCPServer {
     private tools: MCPTools;
     private projectId: string;
     private syncEngine: MemoryBankSync;
+    private workspacePath: string;
 
     constructor(projectId: string, workspacePath: string) {
         this.projectId = projectId;
+        this.workspacePath = workspacePath;
 
         // Use absolute path based on workspace
         const storagePath = workspacePath + '/.agentMemory';
@@ -50,11 +92,18 @@ class MCPServer {
 
         // Initialize sync engine
         this.syncEngine = new MemoryBankSync(workspacePath);
-        this.tools = new MCPTools(this.storage, this.cache, this.syncEngine);
+        this.tools = new MCPTools(this.storage, this.cache, this.syncEngine, workspacePath);
 
         console.error(`[MCP Server] Initialized for project: ${projectId}`);
         console.error(`[MCP Server] Workspace path: ${workspacePath}`);
         console.error(`[MCP Server] Storage path: ${storagePath}`);
+    }
+
+    /**
+     * Public accessor for the tools instance (used for initialization with agents arg)
+     */
+    public getTools(): MCPTools {
+        return this.tools;
     }
 
     /**
@@ -106,6 +155,9 @@ class MCPServer {
                             break;
                         case 'project_init':
                             result = await this.tools.project_init(toolArgs);
+                            break;
+                        case 'configure_agents':
+                            result = await this.tools.configure_agents(toolArgs);
                             break;
                         case 'memory_stats':
                             result = await this.tools.memory_stats(toolArgs);
@@ -224,10 +276,22 @@ class MCPServer {
 }
 
 // Main entry point
-const projectId = process.argv[2] || 'default-project';
-const workspacePath = process.argv[3] || process.cwd();
+const { projectId, workspacePath, agentsArg } = parseArgs();
 
 const server = new MCPServer(projectId, workspacePath);
+
+// If --agents was passed, write to config immediately before starting
+if (agentsArg) {
+    const agentConfig = new AgentConfig(workspacePath);
+    if (!agentConfig.exists()) {
+        server.getTools().configure_agents({ projectId, agents: agentsArg }).then(() => {
+            console.error(`[MCP Server] Pre-configured agents from CLI: ${agentsArg}`);
+        }).catch(err => {
+            console.error(`[MCP Server] Failed to pre-configure agents: ${err}`);
+        });
+    }
+}
+
 server.start();
 
 // Also start Unix socket bridge for KiloCode

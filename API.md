@@ -15,6 +15,40 @@ code --install-extension your-publisher.agentmemory
 
 ---
 
+## Agent Configuration API
+
+### `configureAgents(agents: string[])`
+
+Select which AI coding agents should receive memory bank sync. Only selected agents will have memory bank directories created and files synced.
+
+**Example:**
+```typescript
+// Select KiloCode and OpenCode only
+await api.configureAgents(['kilocode', 'opencode']);
+
+// Get current selection
+const current = await api.getActiveAgents();
+console.log('Active agents:', current); // ['kilocode', 'opencode']
+```
+
+| Agent Key | Full Name | Type |
+|-----------|-----------|------|
+| `kilocode` | KiloCode | VS Code Extension |
+| `cline` | Cline | VS Code Extension |
+| `roocode` | RooCode | VS Code Extension |
+| `opencode` | OpenCode | Terminal TUI |
+
+Configuration is persisted in `.agentMemory/agents.json`:
+```json
+{
+  "selectedAgents": ["kilocode", "opencode"],
+  "createdAt": "2025-01-15T10:00:00Z",
+  "updatedAt": "2025-01-15T10:00:00Z"
+}
+```
+
+---
+
 ## Getting the API
 
 ```typescript
@@ -218,7 +252,7 @@ unsubscribe();
 
 Get statistics about memory usage.
 
-**Returns:** `Promise<any>` - Statistics object with memory counts, cache info, etc.
+**Returns:** `Promise<any>` - Statistics object with memory counts, cache info, agent sync status, etc.
 
 **Example:**
 ```typescript
@@ -227,6 +261,8 @@ const stats = await api.getStats();
 console.log(`Total memories: ${stats.totalMemories}`);
 console.log(`By type:`, stats.byType);
 console.log(`Cache size: ${stats.cache.size}`);
+console.log(`Synced agents:`, stats.sync.agents);
+console.log(`Config exists:`, stats.sync.configExists);
 ```
 
 ---
@@ -280,6 +316,12 @@ interface MemoryEvent {
     agent: string;
     timestamp: number;
 }
+
+interface AgentConfigData {
+    selectedAgents: string[];
+    createdAt: string;
+    updatedAt: string;
+}
 ```
 
 ---
@@ -298,6 +340,9 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     
     const memoryAPI = await agentMemoryExt.activate();
+    
+    // Configure active agents (only KiloCode and OpenCode)
+    await memoryAPI.configureAgents(['kilocode', 'opencode']);
     
     // Example: Store architecture decision
     const storeDecision = vscode.commands.registerCommand('myext.storeDecision', async () => {
@@ -364,6 +409,9 @@ Query memories to help new developers understand the codebase.
 ### 5. Testing Framework
 Store test patterns and retrieve them when generating new tests.
 
+### 6. Agent Configuration Manager
+Programmatically switch which agents sync with the memory bank based on team preferences.
+
 ---
 
 ## Best Practices
@@ -374,6 +422,7 @@ Store test patterns and retrieve them when generating new tests.
 4. **Set createdBy**: Identify your extension in metadata for analytics
 5. **Handle Errors**: Always check for null returns from `read()` and `update()`
 6. **Unsubscribe**: Clean up event subscriptions when no longer needed
+7. **Configure Agents Early**: Call `configureAgents()` during extension activation to set up the right agents for your workspace
 
 ---
 

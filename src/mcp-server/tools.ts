@@ -1,9 +1,11 @@
 import { StorageManager } from './storage';
 import { CacheManager } from './cache';
 import { MemoryBankSync } from './memory-bank-sync';
+import { AgentConfig, AgentConfigData, ALL_AGENTS, AgentName } from './agent-config';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 
 interface Memory {
     id: string;
@@ -34,11 +36,17 @@ export class MCPTools {
     private storage: StorageManager;
     private cache: CacheManager;
     private syncEngine?: MemoryBankSync;
+    private agentConfig?: AgentConfig;
+    private workspacePath: string;
 
-    constructor(storage: StorageManager, cache: CacheManager, syncEngine?: MemoryBankSync) {
+    constructor(storage: StorageManager, cache: CacheManager, syncEngine?: MemoryBankSync, workspacePath?: string) {
         this.storage = storage;
         this.cache = cache;
         this.syncEngine = syncEngine;
+        this.workspacePath = workspacePath || process.cwd();
+        if (this.workspacePath) {
+            this.agentConfig = new AgentConfig(this.workspacePath);
+        }
     }
 
     /**
@@ -150,29 +158,61 @@ export class MCPTools {
     }
 
     /**
-     * Tool 6: project_init - Auto-detect workspace (10μs target)
+     * Tool 6: project_init - Auto-detect workspace and setup agents
+     *
+     * Supports a comma-separated `agents` argument for non-interactive
+     * configuration: e.g., { agents: "kilocode,opencode" }.
+     * If omitted and no agents.json exists, interactive readline prompts
+     * the user (only in a TTY environment).
      */
-    async project_init(params: ToolCallParams): Promise<{ success: boolean; projectId: string }> {
-        const { projectId } = params;
+    async project_init(params: ToolCallParams): Promise<{ success: boolean; projectId: string; configuredAgents: string[] }> {
+        const { projectId, agents } = params;
         await this.storage.initProject(projectId);
 
-        // Auto-create .agent structure if it doesn't exist (Antigravity support)
-        // We need to resolve the workspace path. Since we don't have it passed explicitly in params, 
-        // we'll rely on the storage manager's base path or try to infer it. 
-        // Ideally, we should pass workspacePath to project_init.
-        // For now, let's assume storage manager knows where the root is.
-        // Or better yet, let's update call args to include workspacePath if possible, 
-        // but for safety, we'll try to use the parent of .agentMemory if available.
+        let configuredAgents: string[] = [];
 
+        if (this.agentConfig) {
+            const existing = this.agentConfig.read();
+            if (existing && existing.selectedAgents.length > 0) {
+                configuredAgents = existing.selectedAgents;
+                console.error(`[project_init] Using existing agent config: ${configuredAgents.join(', ')}`);
+            } else if (typeof agents === 'string' && agents.trim()) {
+                const requestedAgents = agents.split(',').map(a => a.trim().toLowerCase() as AgentName);
+                const validAgents = requestedAgents.filter(a => ALL_AGENTS[a] !== undefined);
+                if (validAgents.length > 0) {
+                    this.agentConfig.write(validAgents);
+                    configuredAgents = validAgents;
+                    console.error(`[project_init] Agents configured from CLI args: ${configuredAgents.join(', ')}`);
+                }
+            } else if (process.stdin.isTTY) {
+                try {
+                    configuredAgents = await this.interactiveAgentPrompt();
+                    if (configuredAgents.length > 0) {
+                        this.agentConfig.write(configuredAgents);
+                        console.error(`[project_init] Agents configured interactively: ${configuredAgents.join(', ')}`);
+                    }
+                } catch (error) {
+                    console.error(`[project_init] Interactive prompt failed: ${error}`);
+                }
+            } else {
+                console.error('[project_init] No TTY available, skipping interactive agent selection. Pass --agents or configure later.');
+            }
+            if (configuredAgents.length === 0) {
+                const detected = this.agentConfig.detectPresentAgents();
+                if (detected.length > 0) {
+                    this.agentConfig.write(detected);
+                    configuredAgents = detected;
+                    console.error(`[project_init] Auto-detected present agents: ${configuredAgents.join(', ')}`);
+                }
+            }
+        }
+
+        // Auto-create .agent structure if it doesn't exist (Antigravity support)
         try {
             // @ts-ignore
             const storagePath = this.storage.baseDir;
-            console.error('[project_init] Storage path:', storagePath);
-
             if (storagePath) {
-                const projectRoot = path.dirname(storagePath); // Parent of .agentMemory
-                console.error('[project_init] Project root:', projectRoot);
-
+                const projectRoot = path.dirname(storagePath);
                 const agentDir = path.join(projectRoot, '.agent');
                 const workflowsDir = path.join(agentDir, 'workflows');
 
@@ -182,6 +222,7 @@ export class MCPTools {
 
                 const workflowFile = path.join(workflowsDir, 'update-memory.md');
                 if (!fs.existsSync(workflowFile)) {
+                    const activeAgents = configuredAgents.length > 0 ? configuredAgents.map(a => ALL_AGENTS[a]?.fullName || a).join(', ') : 'All';
                     const workflowContent = `---
 description: How to update the project memory bank with new findings
 ---
@@ -189,6 +230,8 @@ description: How to update the project memory bank with new findings
 # Update Memory Bank
 
 Follow this workflow to document important architectural decisions, patterns, or features.
+
+**Active Agents:** ${activeAgents}
 
 1. **Search First**: Check if a similar memory already exists.
    \`\`\`bash
@@ -222,10 +265,99 @@ Follow this workflow to document important architectural decisions, patterns, or
             }
         } catch (error) {
             console.error('[project_init] Failed to scaffold .agent directory:', error);
-            // Don't fail the init, just log the error
         }
 
-        return { success: true, projectId };
+        return { success: true, projectId, configuredAgents };
+    }
+
+    /**
+     * Tool 6.5: configure_agents - Select which agents to enable/disable for syncing
+     */
+    async configure_agents(params: ToolCallParams): Promise<{ success: boolean; selectedAgents: string[]; previousAgents: string[] }> {
+        const { agents, interactive } = params;
+        let selectedAgents: string[] = [];
+        let previousAgents: string[] = [];
+
+        if (!this.agentConfig) {
+            return { success: false, selectedAgents: [], previousAgents: [] };
+        }
+
+        const existing = this.agentConfig.read();
+        if (existing) {
+            previousAgents = [...existing.selectedAgents];
+        }
+
+        if (typeof agents === 'string' && agents.trim()) {
+            const requestedAgents = agents.split(',').map(a => a.trim().toLowerCase() as AgentName);
+            selectedAgents = requestedAgents.filter(a => ALL_AGENTS[a] !== undefined);
+        } else if (interactive !== false && process.stdin.isTTY) {
+            try {
+                selectedAgents = await this.interactiveAgentPrompt(previousAgents);
+            } catch (error) {
+                console.error(`[configure_agents] Interactive prompt failed: ${error}`);
+            }
+        }
+
+        if (selectedAgents.length === 0) {
+            // Keep previous selection or fall back to detected
+            if (previousAgents.length > 0) {
+                selectedAgents = previousAgents;
+            } else {
+                selectedAgents = this.agentConfig.detectPresentAgents();
+            }
+        }
+
+        if (selectedAgents.length > 0) {
+            this.agentConfig.write(selectedAgents);
+            console.error(`[configure_agents] Agents updated: ${selectedAgents.join(', ')}`);
+        }
+
+        return { success: true, selectedAgents, previousAgents };
+    }
+
+    /**
+     * Interactive readline prompt for selecting agents
+     */
+    private async interactiveAgentPrompt(defaultSelection: string[] = []): Promise<AgentName[]> {
+        return new Promise((resolve) => {
+            const rl = readline.createInterface({
+                input: process.stdin,
+                output: process.stdout
+            });
+
+            const choices = Object.entries(ALL_AGENTS).map(([key, agent]) => {
+                const index = Object.keys(ALL_AGENTS).indexOf(key) + 1;
+                const checked = defaultSelection.includes(key) ? '✅' : '⬜';
+                return `${index}. ${checked} ${agent.fullName} - ${agent.description}`;
+            }).join('\n');
+
+            console.error('\n╔════════════════════════════════════════════════════╗');
+            console.error('║  Select AI Coding Agents for Memory Bank Sync      ║');
+            console.error('╠════════════════════════════════════════════════════╣');
+            console.error(choices);
+            console.error('╠════════════════════════════════════════════════════╣');
+            console.error('║  Enter numbers separated by commas (e.g., 1,3,4)   ║');
+            console.error('║  Or type "all" to select every agent               ║');
+            console.error('╚════════════════════════════════════════════════════╝\n');
+
+            rl.question('Your selection: ', (answer) => {
+                rl.close();
+                const trimmed = answer.trim().toLowerCase();
+
+                if (trimmed === 'all') {
+                    resolve(Object.keys(ALL_AGENTS) as AgentName[]);
+                    return;
+                }
+
+                const indices = trimmed.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+                const keys = Object.keys(ALL_AGENTS) as AgentName[];
+                const selected = indices
+                    .map(idx => keys[idx - 1])
+                    .filter((k): k is AgentName => k !== undefined && ALL_AGENTS[k] !== undefined);
+
+                resolve(selected);
+            });
+        });
     }
 
     /**
@@ -236,10 +368,25 @@ Follow this workflow to document important architectural decisions, patterns, or
         const stats = await this.storage.getStats(projectId);
         const cacheStats = this.cache.getStats();
 
-        // Add sync status if available
+        // Show active agent configuration
+        let activeAgents: string[] = [];
+        let configExists = false;
+        if (this.agentConfig) {
+            const config = this.agentConfig.read();
+            if (config) {
+                activeAgents = config.selectedAgents;
+                configExists = true;
+            }
+            if (activeAgents.length === 0) {
+                activeAgents = this.agentConfig.detectPresentAgents();
+            }
+        }
+
         const syncStatus = this.syncEngine ? {
             enabled: true,
-            agents: ['kilocode', 'cline', 'roocode']
+            agents: activeAgents,
+            configExists,
+            allSupportedAgents: Object.keys(ALL_AGENTS)
         } : { enabled: false };
 
         return {
@@ -326,18 +473,31 @@ Follow this workflow to document important architectural decisions, patterns, or
             },
             {
                 name: 'project_init',
-                description: 'Initialize project storage',
+                description: 'Initialize project storage and optionally configure agents (pass agents: "kilocode,opencode" or use interactive mode)',
                 inputSchema: {
                     type: 'object',
                     properties: {
-                        projectId: { type: 'string' }
+                        projectId: { type: 'string' },
+                        agents: { type: 'string', description: 'Comma-separated list of agents to sync with (e.g., \"kilocode,opencode\")' }
                     },
                     required: ['projectId']
                 }
             },
             {
+                name: 'configure_agents',
+                description: 'Configure which coding agents to sync memory bank files with. Pass agents: "kilocode,opencode" or use interactive mode.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        agents: { type: 'string', description: 'Comma-separated list of agents to enable (e.g., \"kilocode,opencode\")' },
+                        interactive: { type: 'boolean', description: 'If true and TTY available, prompt interactively. Set to false for non-interactive.' }
+                    },
+                    required: []
+                }
+            },
+            {
                 name: 'memory_stats',
-                description: 'Get storage and cache statistics',
+                description: 'Get storage, cache, and sync statistics',
                 inputSchema: {
                     type: 'object',
                     properties: {

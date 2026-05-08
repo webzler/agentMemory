@@ -2,7 +2,7 @@
 
 ## System Overview
 
-agentMemory is a **hybrid memory system** that enhances the built-in memory banks of KiloCode, Cline, and RooCode with powerful search, analytics, and automation capabilities while maintaining full compatibility with their markdown-based documentation.
+agentMemory is a **hybrid memory system** that enhances the built-in memory banks of KiloCode, Cline, RooCode, and OpenCode with powerful search, analytics, and automation capabilities while maintaining full compatibility with their markdown-based documentation.
 
 ## Design Philosophy
 
@@ -14,8 +14,30 @@ Rather than replacing existing memory bank systems, agentMemory **enhances** the
 2. **Syncing** bi-directionally to keep both systems in harmony
 3. **Adding** capabilities they lack (search, analytics, automation)
 4. **Maintaining** git-friendly, human-readable files
+5. **Letting the user choose** which agents to sync with, preventing directory clutter
 
-### Why Hybrid?
+### Why Agent Selection?
+
+Previously, agentMemory automatically configured **all** agents (KiloCode, Cline, RooCode, OpenCode) regardless of which ones the user actually uses. This created unnecessary files and directories in projects, causing confusion and clutter.
+
+**Solution:** The user explicitly selects which agents to sync with. This selection is persisted in `.agentMemory/agents.json` and respected by:
+- The VS Code Extension setup wizard
+- The CLI server startup (`--agents=...` flag)
+- The `configure_agents` MCP tool
+- The bi-directional sync engine
+
+### Agent Configuration Storage
+
+```
+.agentMemory/agents.json
+{
+  "selectedAgents": ["kilocode", "opencode"],
+  "createdAt": "2025-01-15T10:00:00Z",
+  "updatedAt": "2025-01-15T12:30:00Z"
+}
+```
+
+This file is the **single source of truth** for agent selection. All components read from it.
 
 **Their Systems (Markdown)**
 - ✅ Human-readable
@@ -125,9 +147,13 @@ Rather than replacing existing memory bank systems, agentMemory **enhances** the
 - Bi-directional sync engine
 - Parses markdown files from agents' memory banks
 - Exports MCP memories to markdown format
-- Supports KiloCode, Cline, and RooCode
+- Supports KiloCode, Cline, RooCode, and OpenCode
+- **Respects agent selection** from `.agentMemory/agents.json`
+- **Only syncs to selected agents**, prevents directory clutter
 
-**File Mapping:**
+**Agent Configuration:**
+All agent definitions (name, memory bank path, file mapping) live in `src/mcp-server/agent-config.ts` (`ALL_AGENTS`).
+The sync engine reads `agents.json` to determine which agents to sync with.
 ```typescript
 KiloCode:  .kilocode/rules/memory-bank/
   brief.md → architecture
@@ -152,22 +178,47 @@ RooCode: .roo/memory-bank/
   techContext.md → decision
   progress.md → feature
   decisionLog.md → decision
+
+OpenCode: .opencode/memory-bank/
+  architecture.md → architecture
+  patterns.md → pattern
+  decisions.md → decision
+  features.md → feature
+
+OpenCode also syncs to AGENTS.md (project root) for session-start context.
 ```
 
 ### 3. Configuration Management (`src/config.ts`)
 
 **Responsibilities:**
 - Detect installed AI coding agents
+- **Prompt user to select which agents to sync with** (via `showQuickPick` multi-select)
 - Write MCP server config to `.vscode/settings.json`
+- Persist agent selection to `.agentMemory/agents.json`
 - Configure socket paths for each project
+
+**Agent Selection Flow:**
+```
+1. Detect installed extensions (KiloCode, Cline, RooCode)
+2. Detect OpenCode by file system (opencode.json, .opencode/)
+3. Show QuickPick with all agents, pre-selecting installed ones
+4. User picks which agents to sync with
+5. Save selection to .agentMemory/agents.json
+6. Only configure MCP settings for selected agents
+```
 
 **Agent Detection:**
 ```typescript
 detectInstalledAgents(): string[] {
-  // Checks for:
+  // Checks for VS Code extensions:
   // - saoudrizwan.claude-dev (Cline)
   // - kilocode.kilo-code (KiloCode)
-  // - rooveterinaryinc.roo-cline (RooCode)
+  // - roo-code.roo-code (RooCode)
+  // - Continue.continue (Continue)
+  
+  // Also checks for OpenCode by file system:
+  // - opencode.json in workspace root
+  // - .opencode/ directory in workspace
 }
 ```
 

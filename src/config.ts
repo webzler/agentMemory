@@ -22,18 +22,44 @@ export class ConfigManager {
             args: [serverPath, projectId, workspacePath]
         };
 
-        // Detect installed agents
-        const installedAgents = await this.detectInstalledAgents();
-
-        if (installedAgents.length === 0) {
-            this.outputChannel.appendLine('⚠️  No AI coding agents detected. Skipping MCP configuration.');
+        // --- Agent Selection Dialog ---
+        // Ask user which agents to sync with before writing any config files
+        const selectedAgents = await this.promptAgentSelection();
+        if (!selectedAgents || selectedAgents.length === 0) {
+            this.outputChannel.appendLine('⚠️  No agents selected. Skipping MCP configuration.');
             return;
         }
 
-        this.outputChannel.appendLine(`📡 Detected agents: ${installedAgents.join(', ')}`);
+        this.outputChannel.appendLine(`📡 Selected agents: ${selectedAgents.join(', ')}`);
 
-        // Configure each agent's settings file
-        for (const agent of installedAgents) {
+        // Write the agent selection to .agentMemory/agents.json so the MCP server and sync engine respect it
+        try {
+            const { AgentConfig } = require('./mcp-server/agent-config');
+            const agentCfg = new AgentConfig(workspacePath);
+            agentCfg.write(selectedAgents);
+            this.outputChannel.appendLine(`💾 Saved agent selection to .agentMemory/agents.json`);
+        } catch (err: any) {
+            this.outputChannel.appendLine(`⚠️  Failed to save agent selection: ${err.message}`);
+        }
+        // ---
+
+        // Detect installed agents to know WHICH ones can be configured
+        const installedAgents = await this.detectInstalledAgents();
+
+        // Configure each SELECTED agent's settings file
+        for (const agent of selectedAgents) {
+            // OpenCode uses opencode.json (handled by InterceptorManager), skip VS Code settings
+            if (agent === 'opencode') {
+                this.outputChannel.appendLine(`  ℹ️  opencode: configured via opencode.json (handled by interceptor)`);
+                continue;
+            }
+
+            // Only configure if the agent is actually installed (has extension)
+            if (!installedAgents.includes(agent)) {
+                this.outputChannel.appendLine(`  ⚠️  ${agent}: not installed, skipping MCP settings`);
+                continue;
+            }
+
             const settingsPath = this.getAgentSettingsPath(agent);
             if (!settingsPath) {
                 this.outputChannel.appendLine(`⚠️  Unknown settings path for ${agent}`);
@@ -42,6 +68,41 @@ export class ConfigManager {
 
             await this.updateAgentMCPSettings(settingsPath, mcpServerConfig, agent);
         }
+    }
+
+    /**
+     * Show a VS Code QuickPick to let the user select which agents to sync with.
+     * Returns the selected agent keys.
+     */
+    private async promptAgentSelection(): Promise<string[] | undefined> {
+        const allAgents = [
+            { label: 'KiloCode', description: 'VS Code Extension', key: 'kilocode', picked: true },
+            { label: 'Cline', description: 'VS Code Extension', key: 'cline', picked: true },
+            { label: 'RooCode', description: 'VS Code Extension', key: 'roocode', picked: true },
+            { label: 'OpenCode', description: 'Terminal TUI Agent', key: 'opencode', picked: false }
+        ];
+
+        const installed = await this.detectInstalledAgents();
+
+        // Default-pick agents that are actually installed
+        const items = allAgents.map(agent => ({
+            label: `${agent.label}${installed.includes(agent.key) ? ' (installed)' : ''}`,
+            description: agent.description,
+            key: agent.key,
+            picked: installed.includes(agent.key)
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+            canPickMany: true,
+            placeHolder: 'Select which AI coding agents to sync memory bank with (multi-select)',
+            ignoreFocusOut: true
+        });
+
+        if (!selected) {
+            return undefined; // User cancelled
+        }
+
+        return selected.map(s => s.key);
     }
 
     /**
@@ -114,6 +175,23 @@ export class ConfigManager {
             const extension = vscode.extensions.getExtension(extensionId);
             if (extension) {
                 installed.push(agent);
+            }
+        }
+
+        // Detect OpenCode by checking for opencode.json or .opencode/ directory
+        const workspacePath = this.workspaceFolder.uri.fsPath;
+
+        try {
+            await fs.access(path.join(workspacePath, 'opencode.json'));
+            installed.push('opencode');
+            this.outputChannel.appendLine('  ✅ opencode: opencode.json found');
+        } catch {
+            try {
+                await fs.access(path.join(workspacePath, '.opencode'));
+                installed.push('opencode');
+                this.outputChannel.appendLine('  ✅ opencode: .opencode/ directory found');
+            } catch {
+                // OpenCode not detected
             }
         }
 
