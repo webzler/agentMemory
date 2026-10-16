@@ -1,0 +1,35 @@
+{
+  "cache": [
+    [
+      "legacy-project:_index_legacy-project",
+      {
+        "value": "{\"value\":[\"oauth-implementation\",\"api-routes\",\"notes/today\",\"broken-type\"],\"expires\":null}"
+      }
+    ],
+    [
+      "legacy-project:oauth-implementation",
+      {
+        "value": "{\"value\":{\"projectId\":\"legacy-project\",\"relationships\":{\"dependsOn\":[\"api-routes\"],\"implements\":[]},\"id\":\"00000000-0001-4000-8000-000000000001\",\"key\":\"oauth-implementation\",\"type\":\"architecture\",\"content\":\"# OAuth Implementation\\n\\nUpdated: Now using OAuth 2.0 with PKCE\",\"tags\":[\"auth\",\"oauth\",\"security\",\"pkce\"],\"metadata\":{\"accessCount\":3,\"createdBy\":\"integration-test\"},\"createdAt\":1767738847950,\"updatedAt\":1767738847954},\"expires\":null}"
+      }
+    ],
+    [
+      "legacy-project:api-routes",
+      {
+        "value": "{\"value\":{\"projectId\":\"legacy-project\",\"relationships\":{\"dependsOn\":[],\"implements\":[]},\"id\":\"00000000-0002-4000-8000-000000000002\",\"key\":\"api-routes\",\"type\":\"pattern\",\"content\":\"# API Routes\\n\\nRESTful routing patterns for user management\",\"tags\":[\"api\",\"backend\",\"routing\"],\"metadata\":{\"accessCount\":0,\"createdBy\":\"cline\"},\"createdAt\":1767738847952,\"updatedAt\":1767738847952},\"expires\":null}"
+      }
+    ],
+    [
+      "legacy-project:notes/today",
+      {
+        "value": "{\"value\":{\"projectId\":\"legacy-project\",\"relationships\":{\"dependsOn\":[],\"implements\":[]},\"id\":\"00000000-0003-4000-8000-000000000003\",\"key\":\"notes/today\",\"type\":\"decision\",\"content\":\"Key with a path separator\",\"tags\":[],\"metadata\":{\"accessCount\":0,\"createdBy\":\"roocode\",\"sourceFile\":\"decisionLog.md\"},\"createdAt\":1767738847960,\"updatedAt\":1767738847960},\"expires\":null}"
+      }
+    ],
+    [
+      "legacy-project:broken-type",
+      {
+        "value": "{\"value\":{\"projectId\":\"legacy-project\",\"relationships\":{\"dependsOn\":[],\"implements\":[]},\"id\":\"00000000-0004-4000-8000-000000000004\",\"key\":\"broken-type\",\"type\":\"not-a-type\",\"content\":\"Invalid type\",\"tags\":[],\"metadata\":{\"accessCount\":0,\"createdBy\":\"test\"},\"createdAt\":1767738847970,\"updatedAt\":1767738847970},\"expires\":null}"
+      }
+    ]
+  ],
+  "lastExpire": 1767738847946
+}

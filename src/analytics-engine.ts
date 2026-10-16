@@ -31,42 +31,19 @@ export class AnalyticsEngine {
                 // Improved Agent Detection: Check for markers at project root
                 const impliedAgent = await this.detectProjectAgent(projectPath);
 
-                const agentMemoryPath = path.join(projectPath, '.agentMemory');
-                const fsPromises = fs.promises;
+                // Memories are markdown files in .agentMemory/memories/ (legacy
+                // data.json is read for projects that haven't been migrated yet).
+                const { readProjectMemories } = await import('./mcp-server/memory-store');
+                const projectId = path.basename(projectPath);
 
-                const files = await fsPromises.readdir(agentMemoryPath);
-                const memoryFiles = files.filter((f: string) => f.endsWith('.json'));
-
-                for (const file of memoryFiles) {
-                    try {
-                        const filePath = path.join(agentMemoryPath, file);
-                        const data = await fsPromises.readFile(filePath, 'utf8');
-                        const parsed = JSON.parse(data);
-
-                        // Attach project info to every memory
-                        const projectId = path.basename(projectPath);
-
-                        // Handle both simple format and cache format
-                        if (parsed.cache && Array.isArray(parsed.cache)) {
-                            for (const [key, entry] of parsed.cache) {
-                                try {
-                                    const value = JSON.parse(entry.value);
-                                    if (value.value && typeof value.value === 'object') {
-                                        const mem = value.value;
-                                        mem.projectId = projectId;
-                                        mem._projectPath = projectPath; // Internal helper
-                                        mem._impliedAgent = impliedAgent;
-                                        allMemories.push(mem);
-                                    }
-                                } catch (e) { }
-                            }
-                        } else if (parsed.id || parsed.projectId) {
-                            parsed.projectId = projectId;
-                            parsed._projectPath = projectPath;
-                            parsed._impliedAgent = impliedAgent;
-                            allMemories.push(parsed);
-                        }
-                    } catch (fileError) { }
+                for (const memory of await readProjectMemories(projectPath)) {
+                    allMemories.push({
+                        ...memory,
+                        projectId,
+                        metadata: { accessCount: memory.accessCount, createdBy: memory.createdBy },
+                        _projectPath: projectPath, // Internal helper
+                        _impliedAgent: impliedAgent
+                    });
                 }
             } catch (projectError) { }
         }

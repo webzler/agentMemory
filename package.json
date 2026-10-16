@@ -157,7 +157,6 @@
         "publish": "vsce publish"
     },
     "devDependencies": {
-        "@types/chokidar": "^1.7.5",
         "@types/jest": "^30.0.0",
         "@types/node": "^20.0.0",
         "@types/vscode": "^1.85.0",
@@ -168,15 +167,8 @@
         "typescript": "^5.3.0"
     },
     "dependencies": {
-        "@types/uuid": "^10.0.0",
-        "chokidar": "^5.0.0",
-        "fastify": "^4.25.0",
-        "keyv": "^4.5.4",
-        "keyv-file": "^0.2.0",
-        "level": "^8.0.0",
         "lru-cache": "^10.1.0",
-        "msgpack-lite": "^0.1.26",
-        "uuid": "^13.0.0",
+        "yaml": "^2.9.0",
         "zod": "^4.3.5"
     },
     "repository": {

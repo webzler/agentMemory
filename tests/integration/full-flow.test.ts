@@ -1,44 +1,29 @@
-import { StorageManager } from '../../src/mcp-server/storage';
-import { CacheManager } from '../../src/mcp-server/cache';
-import { MCPTools } from '../../src/mcp-server/tools';
-import { MemoryBankSync } from '../../src/mcp-server/memory-bank-sync';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { MemoryStore } from '../../src/mcp-server/memory-store';
+import { MCPTools, ToolInputError } from '../../src/mcp-server/tools';
+import { MCPServer } from '../../src/mcp-server/server';
+import { makeTempWorkspace, removeTempWorkspace, silentLog } from '../helpers/temp-workspace';
 
 describe('Full Flow Integration Tests', () => {
-    const testWorkspace = './test-integration-workspace';
-    const projectId = 'integration-test-project';
-    let storage: StorageManager;
-    let cache: CacheManager;
+    let testWorkspace: string;
+    let store: MemoryStore;
     let tools: MCPTools;
-    let sync: MemoryBankSync;
 
     beforeAll(async () => {
-        // Set up test workspace
-        await fs.mkdir(testWorkspace, { recursive: true });
-
-        const storagePath = path.join(testWorkspace, '.agentMemory');
-        storage = new StorageManager(storagePath);
-        cache = new CacheManager({ maxSize: 100, ttl: 3600000 });
-        sync = new MemoryBankSync(testWorkspace, '.agentMemory');
-        tools = new MCPTools(storage, cache, sync);
-
-        await storage.initProject(projectId);
+        testWorkspace = await makeTempWorkspace();
+        store = new MemoryStore(testWorkspace, { log: silentLog });
+        tools = new MCPTools(store, { projectId: 'integration-test-project', defaultCreatedBy: 'default-agent' });
+        await tools.project_init({});
     });
 
     afterAll(async () => {
-        // Clean up test workspace
-        try {
-            await fs.rm(testWorkspace, { recursive: true, force: true });
-        } catch (error) {
-            // Ignore cleanup errors
-        }
+        await removeTempWorkspace(testWorkspace);
     });
 
     describe('Write → Read → Storage Flow', () => {
         test('should write memory via MCP tools and read it back', async () => {
             const writeResult = await tools.memory_write({
-                projectId,
                 key: 'oauth-implementation',
                 type: 'architecture',
                 content: '# OAuth Implementation\n\nWe use Passport.js for OAuth authentication.',
@@ -46,43 +31,36 @@ describe('Full Flow Integration Tests', () => {
                 createdBy: 'integration-test'
             });
 
-            expect(writeResult.success).toBe(true);
-            expect(writeResult.id).toBeTruthy();
+            expect(writeResult).toEqual({ success: true, id: expect.any(String), created: true });
 
             // Read it back
-            const memory = await tools.memory_read({
-                projectId,
-                key: 'oauth-implementation'
-            });
+            const memory = await tools.memory_read({ key: 'oauth-implementation' });
 
             expect(memory).not.toBeNull();
+            expect(memory?.id).toBe(writeResult.id);
             expect(memory?.key).toBe('oauth-implementation');
             expect(memory?.type).toBe('architecture');
             expect(memory?.content).toContain('OAuth Implementation');
             expect(memory?.tags).toContain('auth');
-            expect(memory?.metadata.createdBy).toBe('integration-test');
+            expect(memory?.createdBy).toBe('integration-test');
         });
 
-        test('should persist to storage', async () => {
-            const fromStorage = await storage.read(projectId, 'oauth-implementation');
-
-            expect(fromStorage).not.toBeNull();
-            expect(fromStorage?.key).toBe('oauth-implementation');
+        test('should persist to a markdown file', async () => {
+            const file = await fs.readFile(path.join(testWorkspace, '.agentMemory', 'memories', 'oauth-implementation.md'), 'utf8');
+            expect(file).toContain('key: oauth-implementation');
+            expect(file).toContain('We use Passport.js for OAuth authentication.');
+            expect((await store.get('oauth-implementation'))?.key).toBe('oauth-implementation');
         });
 
-        test('should be cached after read', async () => {
-            // Read should hit cache on second call
-            const memory1 = await tools.memory_read({
-                projectId,
-                key: 'oauth-implementation'
-            });
+        test('ignores a projectId argument from older clients', async () => {
+            const memory = await tools.memory_read({ projectId: 'something-else', key: 'oauth-implementation' });
+            expect(memory?.key).toBe('oauth-implementation');
+        });
 
-            const memory2 = await tools.memory_read({
-                projectId,
-                key: 'oauth-implementation'
-            });
-
-            expect(memory1).toEqual(memory2);
+        test('uses the default agent name when createdBy is missing', async () => {
+            await tools.memory_write({ key: 'no-author', type: 'feature', content: 'x' });
+            expect((await tools.memory_read({ key: 'no-author' }))?.createdBy).toBe('default-agent');
+            await tools.memory_delete({ key: 'no-author' });
         });
     });
 
@@ -111,162 +89,197 @@ describe('Full Flow Integration Tests', () => {
             ];
 
             for (const mem of testMemories) {
-                await tools.memory_write({
-                    projectId,
-                    ...mem,
-                    createdBy: 'integration-test'
-                });
+                await tools.memory_write({ ...mem, createdBy: 'integration-test' });
             }
         });
 
         test('should search by query', async () => {
-            const results = await tools.memory_search({
-                projectId,
-                query: 'API'
-            });
+            const results = await tools.memory_search({ query: 'API' });
 
-            expect(Array.isArray(results)).toBe(true);
             expect(results.length).toBeGreaterThan(0);
-
-            const apiMemory = results.find(m => m.key === 'api-routes');
-            expect(apiMemory).toBeDefined();
+            expect(results.find(m => m.key === 'api-routes')).toBeDefined();
         });
 
         test('should search by tags', async () => {
-            const results = await tools.memory_search({
-                projectId,
-                tags: ['auth']
-            });
+            const results = await tools.memory_search({ tags: ['auth'] });
 
-            expect(results.length).toBeGreaterThanOrEqual(2); // oauth-implementation + login-bug-fix
-            expect(results.some(m => m.key === 'oauth-implementation')).toBe(true);
-            expect(results.some(m => m.key === 'login-bug-fix')).toBe(true);
+            expect(results.map(m => m.key).sort()).toEqual(['login-bug-fix', 'oauth-implementation']);
         });
 
         test('should filter by type', async () => {
-            const architectureMemories = await tools.memory_search({
-                projectId,
-                type: 'architecture'
-            });
+            const architectureMemories = await tools.memory_search({ type: 'architecture' });
 
             expect(architectureMemories.every(m => m.type === 'architecture')).toBe(true);
             expect(architectureMemories.some(m => m.key === 'oauth-implementation')).toBe(true);
         });
 
-        test('should list all memories', async () => {
-            const allMemories = await tools.memory_list({
-                projectId
-            });
+        test('should rank frequently read memories first', async () => {
+            await tools.memory_read({ key: 'database-schema' });
+            await tools.memory_read({ key: 'database-schema' });
+            const results = await tools.memory_search({ type: 'architecture' });
+            expect(results[0].key).toBe('database-schema');
+        });
 
-            expect(allMemories.length).toBeGreaterThanOrEqual(4); // At least 4 created
+        test('should list all memories', async () => {
+            const allMemories = await tools.memory_list({});
+            expect(allMemories).toHaveLength(4);
         });
 
         test('should respect search limit', async () => {
-            const limitedResults = await tools.memory_search({
-                projectId,
-                query: '',
-                limit: 2
-            });
-
-            expect(limitedResults.length).toBeLessThanOrEqual(2);
+            const limitedResults = await tools.memory_search({ query: '', limit: 2 });
+            expect(limitedResults).toHaveLength(2);
         });
     });
 
-    describe('Update Functionality', () => {
+    describe('Update and Delete', () => {
         test('should update existing memory', async () => {
             const updateResult = await tools.memory_update({
-                projectId,
                 key: 'oauth-implementation',
                 content: '# OAuth Implementation\n\nUpdated: Now using OAuth 2.0 with PKCE',
                 tags: ['auth', 'oauth', 'security', 'pkce']
             });
 
             expect(updateResult.success).toBe(true);
-            expect(updateResult.memory).not.toBeNull();
             expect(updateResult.memory?.content).toContain('PKCE');
             expect(updateResult.memory?.tags).toContain('pkce');
         });
 
         test('updated memory should be retrievable', async () => {
-            const memory = await tools.memory_read({
-                projectId,
-                key: 'oauth-implementation'
-            });
+            const memory = await tools.memory_read({ key: 'oauth-implementation' });
 
             expect(memory?.content).toContain('PKCE');
             expect(memory?.tags).toContain('pkce');
+        });
+
+        test('should delete a memory', async () => {
+            await tools.memory_write({ key: 'temporary', type: 'feature', content: 'Short-lived' });
+            expect(await tools.memory_delete({ key: 'temporary' })).toEqual({ success: true, key: 'temporary' });
+            expect(await tools.memory_read({ key: 'temporary' })).toBeNull();
+            expect(await tools.memory_delete({ key: 'temporary' })).toEqual({ success: false, key: 'temporary' });
         });
     });
 
     describe('Statistics', () => {
         test('should return accurate statistics', async () => {
-            const stats = await tools.memory_stats({
-                projectId
-            });
+            const stats = await tools.memory_stats({});
 
-            expect(stats.totalMemories).toBeGreaterThanOrEqual(4);
-            expect(stats.byType).toBeDefined();
-            expect(stats.byType.architecture).toBeGreaterThanOrEqual(2);
-            expect(stats.cache).toBeDefined();
+            expect(stats.totalMemories).toBe(4);
+            expect(stats.byType).toEqual({ architecture: 2, pattern: 1, bug: 1 });
+            expect(stats.memoriesDir).toBe(path.join(testWorkspace, '.agentMemory', 'memories'));
         });
     });
 
     describe('Concurrent Operations', () => {
         test('should handle concurrent writes', async () => {
-            const concurrentWrites = Array.from({ length: 10 }, (_, i) =>
+            const results = await Promise.all(Array.from({ length: 10 }, (_, i) =>
                 tools.memory_write({
-                    projectId,
                     key: `concurrent-test-${i}`,
                     type: 'feature',
                     content: `# Feature ${i}\n\nTest concurrent write`,
                     tags: ['concurrent', 'test'],
                     createdBy: 'integration-test'
                 })
-            );
-
-            const results = await Promise.all(concurrentWrites);
+            ));
 
             expect(results.every(r => r.success)).toBe(true);
             expect(new Set(results.map(r => r.id)).size).toBe(10); // All unique IDs
         });
 
         test('all concurrent writes should be stored', async () => {
-            // Verify all 10 concurrent writes exist by reading them back
             const concurrentMemories = await Promise.all(
-                Array.from({ length: 10 }, (_, i) =>
-                    storage.read(projectId, `concurrent-test-${i}`)
-                )
+                Array.from({ length: 10 }, (_, i) => store.get(`concurrent-test-${i}`))
             );
 
-            // All 10 should exist
-            const existingCount = concurrentMemories.filter(m => m !== null).length;
-            expect(existingCount).toBe(10);
-
-            // Also verify total count is at least 14 (1 + 3 + 10 from all tests)
-            const stats = await storage.getStats(projectId);
-            expect(stats.totalMemories).toBeGreaterThanOrEqual(10); // At least the 10 concurrent ones
+            expect(concurrentMemories.filter(m => m !== null)).toHaveLength(10);
+            expect((await store.getStats()).totalMemories).toBe(14);
         });
     });
 
     describe('Error Handling', () => {
         test('should handle reading non-existent memory', async () => {
-            const result = await tools.memory_read({
-                projectId,
-                key: 'non-existent-key'
-            });
-
-            expect(result).toBeNull();
+            expect(await tools.memory_read({ key: 'non-existent-key' })).toBeNull();
         });
 
         test('should handle updating non-existent memory', async () => {
-            const result = await tools.memory_update({
-                projectId,
-                key: 'non-existent-key',
-                content: 'Updated content'
-            });
+            const result = await tools.memory_update({ key: 'non-existent-key', content: 'Updated content' });
 
             expect(result.success).toBe(false);
             expect(result.memory).toBeNull();
+        });
+
+        test.each([
+            ['memory_write', { key: '../escape', type: 'feature', content: 'x' }],
+            ['memory_write', { key: 'ok', type: 'not-a-type', content: 'x' }],
+            ['memory_write', { key: 'ok', type: 'feature', content: '' }],
+            ['memory_read', {}],
+            ['memory_read', { key: 'a/b' }],
+            ['memory_search', { limit: 1000 }],
+            ['memory_update', { key: 'C:evil', content: 'x' }],
+            ['memory_delete', { key: '..' }]
+        ])('should reject invalid %s arguments %j', async (tool, args) => {
+            await expect(tools.call(tool, args)).rejects.toThrow(ToolInputError);
+        });
+
+        test('should reject unknown tools', async () => {
+            await expect(tools.call('memory_explode', {})).rejects.toThrow('Unknown tool');
+        });
+    });
+
+    describe('Tool definitions', () => {
+        test('are derived from the Zod schemas and have no projectId', () => {
+            const definitions = MCPTools.listTools();
+            expect(definitions.map(t => t.name)).toEqual([
+                'memory_write', 'memory_read', 'memory_search', 'memory_list',
+                'memory_update', 'memory_delete', 'project_init', 'memory_stats'
+            ]);
+
+            for (const tool of definitions) {
+                const schema = tool.inputSchema as any;
+                expect(schema.type).toBe('object');
+                expect(schema.$schema).toBeUndefined();
+                expect(Object.keys(schema.properties ?? {})).not.toContain('projectId');
+                expect(schema.required ?? []).not.toContain('projectId');
+            }
+
+            const write = definitions.find(t => t.name === 'memory_write')!.inputSchema as any;
+            expect(write.required).toEqual(['key', 'type', 'content']);
+            expect(write.properties.type.enum).toEqual(['architecture', 'pattern', 'feature', 'api', 'bug', 'decision']);
+        });
+    });
+
+    describe('MCP server', () => {
+        let server: MCPServer;
+
+        beforeAll(() => {
+            server = new MCPServer({ explicit: testWorkspace, parentPid: process.ppid, cwd: process.cwd() });
+        });
+
+        test('answers tools/list and tools/call over JSON-RPC', async () => {
+            const list = await server.handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+            expect(list?.result.tools.map((t: any) => t.name)).toContain('memory_delete');
+
+            const call = await server.handleRequest({
+                jsonrpc: '2.0',
+                id: 2,
+                method: 'tools/call',
+                params: { name: 'memory_read', arguments: { key: 'api-routes' } }
+            });
+            expect(JSON.parse(call?.result.content[0].text).key).toBe('api-routes');
+        });
+
+        test('returns invalid-params errors for bad arguments', async () => {
+            const response = await server.handleRequest({
+                jsonrpc: '2.0',
+                id: 3,
+                method: 'tools/call',
+                params: { name: 'memory_write', arguments: { key: '../../etc/passwd', type: 'bug', content: 'x' } }
+            });
+            expect(response?.error?.code).toBe(-32602);
+            expect(response?.error?.message).toContain('path separators');
+        });
+
+        test('does not answer notifications', async () => {
+            expect(await server.handleRequest({ jsonrpc: '2.0', method: 'notifications/initialized' })).toBeNull();
         });
     });
 });

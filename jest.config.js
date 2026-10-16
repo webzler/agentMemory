@@ -5,25 +5,21 @@ module.exports = {
     testMatch: ['**/*.test.ts'],
     moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
 
-    // Transform TypeScript files
+    // Transform TypeScript files (same compiler settings as tsconfig.json)
     transform: {
         '^.+\\.ts$': ['ts-jest', {
             tsconfig: {
+                module: 'commonjs',
+                target: 'ES2020',
+                lib: ['ES2020'],
+                strict: true,
                 esModuleInterop: true,
-                allowSyntheticDefaultImports: true
+                allowSyntheticDefaultImports: true,
+                skipLibCheck: true,
+                resolveJsonModule: true,
+                moduleResolution: 'node'
             }
         }]
-    },
-
-    // Don't transform node_modules except specific packages
-    transformIgnorePatterns: [
-        'node_modules/(?!(uuid|chokidar))'
-    ],
-
-    // Mock problematic ESM packages
-    moduleNameMapper: {
-        '^uuid$': '<rootDir>/tests/__mocks__/uuid.ts',
-        '^chokidar$': '<rootDir>/tests/__mocks__/chokidar.ts'
     },
 
     collectCoverageFrom: [

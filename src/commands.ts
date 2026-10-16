@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
-import { StorageManager } from './mcp-server/storage';
-import { CacheManager } from './mcp-server/cache';
+import { MemoryStore } from './mcp-server/memory-store';
+import { Memory, MemoryType } from './mcp-server/schemas';
 import { DashboardServer } from './dashboard-server';
-import { Memory } from './api';
 
+/**
+ * Memory commands. They read the workspace's `.agentMemory/memories/` through
+ * the same store the MCP server uses, so they always see current data.
+ */
 export class MemoryCommands {
     constructor(
-        private storage: StorageManager,
-        private cache: CacheManager,
+        private store: MemoryStore,
         private dashboard: DashboardServer,
         private context: vscode.ExtensionContext
     ) { }
@@ -16,8 +18,6 @@ export class MemoryCommands {
      * Search memories by keyword
      */
     async searchMemories(): Promise<void> {
-        const projectId = this.getProjectId();
-
         const query = await vscode.window.showInputBox({
             prompt: 'Search memories by keyword',
             placeHolder: 'Enter search term (e.g., "authentication", "API", etc.)',
@@ -39,7 +39,7 @@ export class MemoryCommands {
             cancellable: false
         }, async () => {
             try {
-                const results = await this.storage.search(projectId, query);
+                const results = await this.store.search({ query });
 
                 if (results.length === 0) {
                     vscode.window.showInformationMessage(`No memories found for "${query}"`);
@@ -73,15 +73,13 @@ export class MemoryCommands {
      * View all memories in the project
      */
     async viewAllMemories(): Promise<void> {
-        const projectId = this.getProjectId();
-
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: 'Loading memories...',
             cancellable: false
         }, async () => {
             try {
-                const memories = await this.storage.list(projectId);
+                const memories = await this.store.list();
 
                 if (memories.length === 0) {
                     vscode.window.showInformationMessage('No memories found in this project');
@@ -115,10 +113,8 @@ export class MemoryCommands {
      * View memories filtered by type
      */
     async viewByType(): Promise<void> {
-        const projectId = this.getProjectId();
-
         // First, select the type
-        const typeSelected = await vscode.window.showQuickPick([
+        const typeSelected = await vscode.window.showQuickPick<vscode.QuickPickItem & { type: MemoryType }>([
             { label: '$(symbol-class) Architecture', type: 'architecture' },
             { label: '$(symbol-method) Pattern', type: 'pattern' },
             { label: '$(symbol-property) Feature', type: 'feature' },
@@ -139,7 +135,7 @@ export class MemoryCommands {
             cancellable: false
         }, async () => {
             try {
-                const memories = await this.storage.list(projectId, typeSelected.type as any);
+                const memories = await this.store.list(typeSelected.type);
 
                 if (memories.length === 0) {
                     vscode.window.showInformationMessage(
@@ -171,7 +167,8 @@ export class MemoryCommands {
     }
 
     /**
-     * Clear the memory cache
+     * Clear the memory cache. Memories are re-read from disk whenever their
+     * files change, so this is only needed if file timestamps can't be trusted.
      */
     async clearCache(): Promise<void> {
         const confirm = await vscode.window.showWarningMessage(
@@ -181,11 +178,8 @@ export class MemoryCommands {
         );
 
         if (confirm === 'Clear Cache') {
-            this.cache.clear();
-            const stats = this.cache.getStats();
-            vscode.window.showInformationMessage(
-                `✓ Memory cache cleared (was ${stats.size} entries)`
-            );
+            this.store.clearCache();
+            vscode.window.showInformationMessage('✓ Memory cache cleared');
         }
     }
 
@@ -226,10 +220,9 @@ export class MemoryCommands {
             '',
             `**Type**: ${memory.type}`,
             `**Tags**: ${memory.tags.join(', ') || 'none'}`,
-            `**Created By**: ${memory.metadata.createdBy}`,
-            `**Created**: ${new Date(memory.metadata.createdAt).toLocaleString()}`,
-            `**Updated**: ${new Date(memory.metadata.updatedAt).toLocaleString()}`,
-            `**Version**: ${memory.metadata.version}`,
+            `**Created By**: ${memory.createdBy}`,
+            `**Created**: ${new Date(memory.createdAt).toLocaleString()}`,
+            `**Updated**: ${new Date(memory.updatedAt).toLocaleString()}`,
             '',
             '---',
             '',
@@ -252,13 +245,6 @@ export class MemoryCommands {
         }
 
         return lines.join('\n');
-    }
-
-    /**
-     * Get current project ID
-     */
-    private getProjectId(): string {
-        return vscode.workspace.name || 'default';
     }
 
     /**

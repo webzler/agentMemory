@@ -9,9 +9,12 @@
 import { SecurityManager } from './security';
 import { MCPClient } from './mcp-client';
 import { RateLimiter } from './rate-limiter';
+import { Memory, MemoryType } from './mcp-server/schemas';
+
+export type { Memory, MemoryType } from './mcp-server/schemas';
 
 export interface MemoryOptions {
-    type: 'architecture' | 'pattern' | 'feature' | 'api' | 'bug' | 'decision';
+    type: MemoryType;
     tags?: string[];
     relationships?: {
         dependsOn?: string[];
@@ -23,30 +26,10 @@ export interface MemoryOptions {
     };
 }
 
-export interface Memory {
-    id: string;
-    projectId: string;
-    key: string;
-    type: 'architecture' | 'pattern' | 'feature' | 'api' | 'bug' | 'decision';
-    content: string;
-    tags: string[];
-    relationships: {
-        dependsOn: string[];
-        implements: string[];
-    };
-    metadata: {
-        accessCount: number;
-        createdBy: string;
-        [key: string]: any;
-    };
-    createdAt: number;
-    updatedAt: number;
-}
-
 export interface SearchOptions {
     query?: string;
     tags?: string[];
-    type?: 'architecture' | 'pattern' | 'feature' | 'api' | 'bug' | 'decision';
+    type?: MemoryType;
     limit?: number;
     onlyOwn?: boolean; // Only return memories created by this extension
 }
@@ -92,7 +75,6 @@ export class MemoryAPI {
 
     constructor(
         private extensionId: string,
-        private projectId: string,
         private securityManager: SecurityManager,
         private mcpClient: MCPClient | null  // MCP client for server communication
     ) {
@@ -104,7 +86,8 @@ export class MemoryAPI {
     }
 
     /**
-     * Write a new memory to the memory bank
+     * Write a memory to the memory bank. Writing an existing key replaces its
+     * content and keeps its id and creation time.
      * 
      * @param key - Unique identifier for the memory
      * @param content - Memory content (supports Markdown)
@@ -130,7 +113,6 @@ export class MemoryAPI {
         }
 
         const params = {
-            projectId: this.projectId,
             key,
             content,
             type: options.type,
@@ -163,12 +145,7 @@ export class MemoryAPI {
         // Check rate limit
         this.checkRateLimit();
 
-        const params = {
-            projectId: this.projectId,
-            key
-        };
-
-        const result = await this.callMCPTool('memory_read', params) as Memory | null;
+        const result = await this.callMCPTool('memory_read', { key }) as Memory | null;
 
         if (result) {
             // Security check: Can this extension read this memory?
@@ -176,7 +153,7 @@ export class MemoryAPI {
                 this.extensionId,
                 'read',
                 key,
-                result.metadata.createdBy
+                result.createdBy
             );
 
             if (!permission.allowed) {
@@ -206,7 +183,6 @@ export class MemoryAPI {
         this.checkRateLimit();
 
         const params = {
-            projectId: this.projectId,
             query: options.query,
             tags: options.tags,
             type: options.type,
@@ -219,7 +195,7 @@ export class MemoryAPI {
         const filteredResults: Memory[] = [];
         for (const memory of results) {
             // If onlyOwn flag is set, only include own memories
-            if (options.onlyOwn && memory.metadata.createdBy !== this.extensionId) {
+            if (options.onlyOwn && memory.createdBy !== this.extensionId) {
                 continue;
             }
 
@@ -227,7 +203,7 @@ export class MemoryAPI {
                 this.extensionId,
                 'read',
                 memory.key,
-                memory.metadata.createdBy
+                memory.createdBy
             );
 
             if (permission.allowed) {
@@ -244,13 +220,8 @@ export class MemoryAPI {
      * @param type - Optional memory type filter
      * @returns Promise resolving to array of memories
      */
-    async list(type?: string): Promise<Memory[]> {
-        const params = {
-            projectId: this.projectId,
-            type
-        };
-
-        return await this.callMCPTool('memory_list', params);
+    async list(type?: MemoryType): Promise<Memory[]> {
+        return await this.callMCPTool('memory_list', { type });
     }
 
     /**
@@ -260,9 +231,8 @@ export class MemoryAPI {
      * @param updates - Partial updates to apply
      * @returns Promise resolving to updated memory, or null if not found
      */
-    async update(key: string, updates: Partial<Pick<Memory, 'content' | 'tags' | 'relationships'>>): Promise<Memory | null> {
+    async update(key: string, updates: Partial<Pick<Memory, 'type' | 'content' | 'tags' | 'relationships'>>): Promise<Memory | null> {
         const params = {
-            projectId: this.projectId,
             key,
             ...updates
         };
@@ -283,7 +253,48 @@ export class MemoryAPI {
     }
 
     /**
-     * Subscribe to memory events (write, read, update)
+     * Delete a memory
+     * 
+     * @param key - Memory key to delete
+     * @returns Promise resolving to true if the memory existed and was deleted
+     */
+    async delete(key: string): Promise<boolean> {
+        // Check rate limit
+        this.checkRateLimit();
+
+        const existing = await this.callMCPTool('memory_read', { key }) as Memory | null;
+        if (!existing) {
+            return false;
+        }
+
+        // Security check: Can this extension delete this memory?
+        const permission = await this.securityManager.checkPermission(
+            this.extensionId,
+            'delete',
+            key,
+            existing.createdBy
+        );
+
+        if (!permission.allowed) {
+            throw new Error(`Permission denied: ${permission.reason}`);
+        }
+
+        const result = await this.callMCPTool('memory_delete', { key });
+
+        if (result.success) {
+            this.emitEvent({
+                action: 'delete',
+                key,
+                agent: this.extensionId,
+                timestamp: Date.now()
+            });
+        }
+
+        return !!result.success;
+    }
+
+    /**
+     * Subscribe to memory events (write, read, update, delete)
      * 
      * @param callback - Function to call when events occur
      * @returns Unsubscribe function
@@ -303,11 +314,7 @@ export class MemoryAPI {
      * @returns Promise resolving to statistics object
      */
     async getStats(): Promise<any> {
-        const params = {
-            projectId: this.projectId
-        };
-
-        return await this.callMCPTool('memory_stats', params);
+        return await this.callMCPTool('memory_stats', {});
     }
 
     /**

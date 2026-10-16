@@ -6,9 +6,12 @@ import { MemoryAPI } from './api';
 import { SecurityManager } from './security';
 import { MCPClient } from './mcp-client';
 import { MemoryCommands } from './commands';
+import { MemoryStore } from './mcp-server/memory-store';
+import { unregisterHost } from './mcp-server/workspace';
 import * as path from 'path';
 
 let mcpServerProcess: ChildProcess | null = null;
+let hostsDir: string | null = null; // Where this window registered its workspace for MCP servers
 let mcpClient: MCPClient | null = null;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
@@ -20,7 +23,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(outputChannel);
 
     outputChannel.appendLine('🧠 agentMemory extension is now active');
-    outputChannel.appendLine(`Version: 0.2.0`);
+    outputChannel.appendLine(`Version: ${context.extension.packageJSON.version}`);
     outputChannel.appendLine(`Activated at: ${new Date().toLocaleString()}`);
     outputChannel.appendLine('');
 
@@ -42,6 +45,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Initialize configuration manager
     const configManager = new ConfigManager(context, workspaceFolder, outputChannel);
+    hostsDir = configManager.hostsDir;
 
     // Initialize interceptor manager
     const interceptorManager = new InterceptorManager(workspaceFolder, outputChannel);
@@ -85,15 +89,18 @@ export function activate(context: vscode.ExtensionContext) {
     const { DashboardServer } = require('./dashboard-server');
     dashboardServer = new DashboardServer(context, outputChannel); // Assign to module variable
 
-    // Initialize and get storage/cache for commands
-    const { StorageManager } = require('./mcp-server/storage');
-    const { CacheManager } = require('./mcp-server/cache');
-    const storagePath = path.join(workspaceFolder.uri.fsPath, '.agentMemory');
-    const storage = new StorageManager(storagePath);
-    const cache = new CacheManager({ maxSize: 10000, ttl: 3600000 });
+    // Memory store for commands: the same .agentMemory/memories/ the MCP server uses
+    const store = new MemoryStore(workspaceFolder.uri.fsPath, {
+        log: message => outputChannel.appendLine(`[MemoryStore] ${message}`)
+    });
+
+    // Create .agentMemory/memories/ and import a legacy data.json right away
+    store.init().catch((error: any) => {
+        outputChannel.appendLine(`❌ Memory storage initialization failed: ${error.message}`);
+    });
 
     // Register memory commands
-    const commands = new MemoryCommands(storage, cache, dashboardServer, context);
+    const commands = new MemoryCommands(store, dashboardServer, context);
     context.subscriptions.push(
         vscode.commands.registerCommand('agentMemory.searchMemories',
             () => commands.searchMemories()),
@@ -120,8 +127,7 @@ export function activate(context: vscode.ExtensionContext) {
     const securityManager = new SecurityManager(context);
 
     // Initialize and export the public API
-    const projectId = path.basename(workspaceFolder.uri.fsPath);
-    const api = new MemoryAPI('agentmemory', projectId, securityManager, mcpClient);
+    const api = new MemoryAPI('agentmemory', securityManager, mcpClient);
 
     // Return API for other extensions to use
     return api;
@@ -137,9 +143,10 @@ function startMCPServer(context: vscode.ExtensionContext, workspacePath: string)
     outputChannel.appendLine(`\n🚀 Starting MCP server for project: ${projectId}`);
     outputChannel.appendLine(`   Server path: ${serverPath}`);
 
-    mcpServerProcess = spawn('node', [serverPath, projectId, workspacePath], {
+    // Run the server on VS Code's own Node runtime; `node` may not be on PATH.
+    mcpServerProcess = spawn(process.execPath, [serverPath, '--workspace', workspacePath], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, PROJECT_ID: projectId, WORKSPACE_PATH: workspacePath }
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AGENTMEMORY_AGENT: 'agentmemory-extension' }
     });
 
     mcpServerProcess.stdout?.on('data', (data) => {
@@ -162,29 +169,6 @@ function startMCPServer(context: vscode.ExtensionContext, workspacePath: string)
     return client;
 }
 
-/**
- * Import existing memory bank files from all agents
- */
-async function importExistingMemoryBanks(workspaceFolder: vscode.WorkspaceFolder): Promise<void> {
-    const { MemoryBankSync } = await import('./mcp-server/memory-bank-sync');
-    const syncEngine = new MemoryBankSync(workspaceFolder.uri.fsPath);
-
-    outputChannel?.appendLine('[Import] Checking for existing memory bank files...');
-
-    try {
-        await syncEngine.importAll();
-        outputChannel?.appendLine('[Import] ✅ Initial import complete');
-
-        // Start file watching
-        syncEngine.startWatching().catch(err => {
-            outputChannel?.appendLine(`[Import] ⚠️  Watching: ${err.message}`);
-        });
-    } catch (error: any) {
-        outputChannel?.appendLine(`[Import] ❌ Error: ${error.message}`);
-        throw error;
-    }
-}
-
 export function deactivate() {
     if (mcpServerProcess) {
         mcpServerProcess.kill();
@@ -194,6 +178,11 @@ export function deactivate() {
     if (dashboardServer) {
         dashboardServer.stop();
         dashboardServer = null;
+    }
+
+    if (hostsDir) {
+        unregisterHost(hostsDir);
+        hostsDir = null;
     }
 
     if (statusBarItem) {
